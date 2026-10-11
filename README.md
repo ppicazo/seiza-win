@@ -1,9 +1,9 @@
 # Seiza for Windows
 
-Seiza is a fast, native Windows astronomy image viewer and plate-solving app.
-It combines a modern WinUI 3 interface and GPU-backed viewport with the shared
-[Seiza](https://github.com/theatrus/seiza) Rust image, catalog, and solving
-core.
+Seiza is a fast, native Windows app for viewing, processing, solving and
+stacking astronomy images — and turning them into parallax videos. It combines
+a modern WinUI 3 interface and GPU-backed viewport with the shared
+[Seiza](https://github.com/theatrus/seiza) Rust imaging core.
 
 [Download Seiza for Windows 0.8.0 (x64)](https://github.com/theatrus/seiza-win/releases/download/v0.8.0/seiza-0.8.0-windows-x86_64.msi)
 · [Release notes and previous versions](https://github.com/theatrus/seiza-win/releases)
@@ -12,33 +12,62 @@ core.
 [Seiza for Mac](https://github.com/theatrus/seiza-mac) ·
 [FITS and XISF for Photoshop](https://github.com/theatrus/xisf-photoshop)
 
+## Fly through your astronomy images
+
+New in **Seiza for Windows 0.8.0**: turn a finished image into a fly-in or
+multi-stop video tour. Star-catalog distances and adjustable scene depth make
+nearby stars move against the nebula as the camera travels. Plan a route
+yourself or generate one, then preview and export it in a native Windows editor.
+
+![The native Windows parallax editor showing an Iris Nebula preview, editable tour stops, timeline and MP4 export controls](docs/images/parallax-tour-export.jpg)
+
+### Watch the results
+
+These published examples use Seiza's shared parallax renderer. Click a preview
+to open its video player on theatr.us; the gallery includes both landscape and
+portrait compositions.
+
+| Iris Nebula · NGC 7023 | The Question Mark · Sh2-171 / Sh2-170 |
+| --- | --- |
+| <a href="https://theatr.us/gallery/detail/astrobin/iris-nebula/288w86"><img src="https://theatr.us/gallery/_image/astrobin/iris-nebula/288w86/medium" height="240" alt="Watch the Iris Nebula parallax tour" /></a> | <a href="https://theatr.us/gallery/detail/astrobin/big-q/29k8tr"><img src="https://theatr.us/gallery/_image/astrobin/big-q/29k8tr/medium" height="240" alt="Watch the portrait Question Mark Nebula parallax tour" /></a> |
+| [Watch the landscape tour](https://theatr.us/gallery/detail/astrobin/iris-nebula/288w86) | [Watch the portrait tour](https://theatr.us/gallery/detail/astrobin/big-q/29k8tr) |
+
+Images and videos by [Yann Ramin (theatrus)](https://theatr.us/), from the
+[AstroBin gallery collection](https://theatr.us/gallery/astrobin). Also watch the
+[hosted tour on seiza.fyi](https://seiza.fyi/)
+([direct MP4](https://seiza.fyi/media/parallax-tour.mp4)). The gallery examples
+are HEVC; playback depends on your browser's codec support.
+
+### Make your own
+
+Open an image and choose **Parallax video…** from the toolbar's More options
+menu. Import aligned starless and unscreened-stars layers, or optionally use a
+separately installed RC-Astro CLI (`rc-astro.exe`) licensed for StarXTerminator.
+
+- Generate a multi-stop tour or pick destinations directly on the image. Edit
+  travel, holds, zoom, pan and roll; save and load portable tour itinerary JSON.
+- Preview, play and scrub your camera move. Tune star and background depth,
+  use offline distance catalogs, and add object labels, titles and a credit.
+- Export silent MP4 in landscape or portrait, with presets up to 4K and native
+  H.264 or HEVC encoding. HEVC requires an available Windows encoder.
+- Keep your source images untouched. The independent workspace retains a
+  private snapshot after the viewer closes, and a cancelled export preserves
+  an existing movie.
+
+![Native Windows camera controls with automatic tour generation, editable stops and a timeline preview](docs/images/parallax-tour-camera.jpg)
+
+See the [Windows parallax guide](docs/PARALLAX-VIDEO.md) for layer requirements,
+camera and tour controls, encoder availability and export limits. The Windows
+app uses published Seiza 0.25.1, stacking 0.27.0 and parallax 0.2.1 crates,
+without vendored patches.
+
+## View, solve and stack, too
+
+Browse FITS and XISF images with automatic stretches, solve against local sky
+catalogs, inspect overlays, and build directory or live-folder stacks in the
+same app.
+
 ![A solved NGC 7000 FITS image with WCS grid, catalog overlays, solution summary, and histogram inspector](docs/images/solved-overlays.png)
-
-## Seiza for Windows 0.8.0: parallax video
-
-The native Windows parallax editor follows [seiza-mac #56](https://github.com/theatrus/seiza-mac/pull/56):
-fly-in camera moves, generated and editable tours, depth-aware labels, offline
-distances, and silent H.264/HEVC MP4 export. Open an image, then choose
-**Parallax video…** from the toolbar’s More options menu. See the
-[Windows parallax guide](docs/PARALLAX-VIDEO.md) for layer requirements, controls,
-encoder availability, and safety details.
-
-- Import aligned starless and unscreened-stars layers, or use a separately
-  installed RC-Astro CLI (`rc-astro.exe`) licensed for StarXTerminator.
-  Manual-layer solving uses the selected stars even when the viewer contains
-  the starless image.
-- Pick destinations on the image, preview camera moves, generate and edit
-  multi-stop tours, and save portable tour itinerary JSON.
-- Configure star/background depth, offline distance catalogs, labels, output
-  size and frame rate. Export through Windows Media Foundation; encoder
-  availability depends on your machine.
-- Parallax windows keep their private source snapshot and remain usable after
-  the original viewer closes. Export cancellation preserves existing files.
-
-This release uses published Seiza 0.25.1, stacking 0.27.0 and parallax 0.2.1
-crates, without vendored patches.
-
-![Native parallax workspace with aligned manual layers, solved coordinates and offline stellar distances](docs/images/parallax-video.jpg)
 
 ## Seiza for Windows 0.7.6
 
@@ -256,6 +285,10 @@ Other preview highlights still apply:
 
 ## What it can do
 
+- Turn finished images into depth-aware fly-ins and editable video tours in a
+  native parallax workspace, with labels, timeline previews and silent MP4
+  export up to 4K. Use aligned starless/stars layers or optional licensed
+  StarXTerminator separation through the separately installed RC-Astro CLI.
 - Open FITS, XISF, PNG, JPEG, and TIFF images, folders, or dropped files; browse
   naturally sorted image sets in a cached thumbnail rail without blocking the UI.
 - See autostretched FITS and XISF content thumbnails directly in Windows File
