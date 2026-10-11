@@ -81,9 +81,21 @@
                                 Toggled="Configuration_Changed" />
                             <ToggleSwitch x:Name="AutomaticReferenceToggle" Header="Choose the best existing reference automatically" IsOn="False" Toggled="Configuration_Changed" />
                             <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Scores existing raw lights matching the first light's filter and sensor. An empty folder starts with its first stable light; a resumed stack keeps its saved reference." TextWrapping="Wrap" />
+                            <TextBlock Style="{ThemeResource BodyStrongTextBlockStyle}" Text="Shared alignment reference (optional)" />
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="AlignmentReferenceTextBox" AutomationProperties.Name="Shared alignment reference" IsReadOnly="True" PlaceholderText="Use this filter's reference light" />
+                                <Button x:Name="ChooseAlignmentReferenceButton" Grid.Column="1" Click="ChooseAlignmentReference_Click" Content="Choose…" AutomationProperties.Name="Choose shared alignment reference" />
+                                <Button x:Name="ClearAlignmentReferenceButton" Grid.Column="2" Click="ClearAlignmentReference_Click" Content="Clear" AutomationProperties.Name="Clear shared alignment reference" />
+                            </Grid>
+                            <TextBlock x:Name="AlignmentReferenceHelpText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                             <TextBlock
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="The first compatible light locks image dimensions and filter for this window. Files for other filters are ignored; use a separate capture folder for each simultaneous filter stack."
+                                Text="The first compatible light locks sensor identity and filter for this window. Files for other filters are ignored; use a separate capture folder for each simultaneous filter stack."
                                 TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>

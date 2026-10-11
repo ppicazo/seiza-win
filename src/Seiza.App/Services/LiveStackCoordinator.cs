@@ -44,6 +44,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
     private string _sessionId = Guid.NewGuid().ToString("N");
     private DateTimeOffset _createdAtUtc;
     private string _outputPath;
+    private string? _alignmentReferencePath;
     private int _acceptedFrames;
     private int _rejectedFrames;
     private int _nativeRejectedFrames;
@@ -72,6 +73,11 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         _calibration = CloneCalibration(_configuration.Calibration);
         _optionsJson = _configuration.Options.ToJson();
         _outputPath = FullPathOrEmpty(_configuration.OutputPath);
+        _alignmentReferencePath = _configuration.AlignmentReferencePath;
+        if (_alignmentReferencePath is not null)
+        {
+            StackingCoreCapabilities.Current.RequireReferenceImage(_configuration.ChooseReferenceAutomatically);
+        }
 
         string groupDirectory = Path.Combine(
             _configuration.SessionRootDirectory,
@@ -304,6 +310,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                 {
                     throw new InvalidOperationException("The live stack has already been finalized.");
                 }
+                ValidateAlignmentCalibration(replacement);
 
                 if (_session is null)
                 {
@@ -432,7 +439,8 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                 {
                     // The native snapshot owns its pixels, so folder ingestion
                     // may continue while the potentially large FITS is written.
-                    await snapshot.WriteFitsAsync(fullOutputPath, cancellationToken)
+                    await snapshot.WriteFitsAsync(fullOutputPath,
+                        () => EnsureSafeOutputPath(fullOutputPath), cancellationToken)
                         .ConfigureAwait(false);
                     outputWritten = true;
                     _monitor.CommitReservedPath(fullOutputPath);
@@ -584,7 +592,8 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                 await using (snapshot)
                 {
                     ImageStackSnapshot output = cleaned ?? snapshot;
-                    await output.WriteFitsAsync(fullOutputPath, cancellationToken)
+                    await output.WriteFitsAsync(fullOutputPath, null,
+                        () => EnsureSafeOutputPath(fullOutputPath), cancellationToken)
                         .ConfigureAwait(false);
                     _monitor.SeedProcessedPaths([fullOutputPath]);
                     lock (_stateSync)
@@ -779,6 +788,15 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                 LiveStackNativeState nativeState = await candidateSession
                     .GetStateAsync(cancellationToken)
                     .ConfigureAwait(false);
+                if (_configuration.AlignmentReferencePath is string requestedAlignment &&
+                    !StackSourceIdentity.RefersToSameFile(requestedAlignment, nativeState.ReferenceImagePath))
+                {
+                    AddAttention("The saved stack uses a different alignment reference; starting a new accumulator.",
+                        candidate.ContextPath);
+                    await candidateSession.DisposeAsync().ConfigureAwait(false);
+                    candidateSession = null;
+                    continue;
+                }
                 if (!_store.TryAcceptRestoredGeneration(candidate, nativeState))
                 {
                     AddAttention(
@@ -797,8 +815,14 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                 _session = candidateSession;
                 candidateSession = null;
                 RestoreState(candidate, nativeState, referenceSignature);
+                _alignmentReferencePath = nativeState.ReferenceImagePath;
                 SeedCalibrationPaths(_calibration);
                 _monitor.SeedProcessedPaths(nativeState.InputPaths);
+                if (_alignmentReferencePath is not null)
+                {
+                    _monitor.ReservePath(_alignmentReferencePath);
+                    _monitor.SeedProcessedPaths([_alignmentReferencePath]);
+                }
                 _monitor.SeedProcessedFrames(candidate.State.Frames);
                 _monitor.SeedProcessedPaths(candidate.State.ExportedPaths.Concat(
                     string.IsNullOrWhiteSpace(candidate.State.OutputPath)
@@ -915,11 +939,17 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
             StackReferenceSelection selection = await _referenceSelector(
                 eligible.Select(candidate => candidate.Path).ToArray(), cancellationToken).ConfigureAwait(false);
             selection.Validate(eligible.Select(candidate => candidate.Path).ToArray());
-            StackFileReadyCandidate selected = eligible[selection.ReferenceIndex];
-            if (!await OpenInitialReferenceAsync(selected.Path, cancellationToken, selected).ConfigureAwait(false))
+            string[] rankedPaths = _configuration.AlignmentReferencePath is not null
+                ? selection.GetAlignmentCandidates(eligible.Select(candidate => candidate.Path).ToArray())
+                : [selection.ReferencePath];
+            StackFileReadyCandidate[] ranked = rankedPaths
+                .Select(path => eligible.Single(candidate => LiveStackPath.Equals(candidate.Path, path)))
+                .Where(LiveStackReferenceCandidates.IsUnchanged).ToArray();
+            if (ranked.Length == 0 ||
+                !await OpenInitialReferenceAsync(ranked[0].Path, cancellationToken, ranked).ConfigureAwait(false))
             {
                 AddAttention("The selected reference changed during scoring; waiting for the first stable light.",
-                    selected.Path);
+                    selection.ReferencePath);
             }
         }
         catch (OperationCanceledException)
@@ -941,8 +971,9 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
     private async Task<bool> OpenInitialReferenceAsync(
         string referencePath,
         CancellationToken cancellationToken,
-        StackFileReadyCandidate? expectedCandidate = null)
+        StackFileReadyCandidate[]? expectedCandidates = null)
     {
+        StackFileReadyCandidate? expectedCandidate = expectedCandidates is { Length: > 0 } ? expectedCandidates[0] : null;
         if (expectedCandidate is not null && !LiveStackReferenceCandidates.IsUnchanged(expectedCandidate))
         {
             return false;
@@ -981,11 +1012,56 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         ImageStackSession? opened = null;
         try
         {
-            opened = await ImageStackSession.OpenAsync(
-                fullPath,
-                _configuration.Options,
-                _calibration,
-                cancellationToken).ConfigureAwait(false);
+            if (_configuration.AlignmentReferencePath is string alignmentPath)
+            {
+                string[] paths = expectedCandidates is null
+                    ? [fullPath]
+                    : expectedCandidates.Where(LiveStackReferenceCandidates.IsUnchanged)
+                        .Select(candidate => candidate.Path).ToArray();
+                if (paths.Length == 0)
+                {
+                    return false;
+                }
+                ImageStackReferenceOpenResult result = await ImageStackSession.OpenWithReferenceImageAsync(
+                    alignmentPath, paths, _configuration.Options, _calibration, cancellationToken)
+                    .ConfigureAwait(false);
+                opened = result.Session;
+                fullPath = result.Selection.ChannelReferencePath;
+                expectedCandidate = expectedCandidates?.Single(candidate => LiveStackPath.Equals(candidate.Path, fullPath));
+                if (expectedCandidate is not null && !LiveStackReferenceCandidates.IsUnchanged(expectedCandidate))
+                {
+                    return false;
+                }
+                probe = await CalibrationService.ProbeAsync(fullPath, cancellationToken).ConfigureAwait(false);
+                if (expectedCandidate is not null && !LiveStackReferenceCandidates.IsUnchanged(expectedCandidate))
+                {
+                    return false;
+                }
+                file = new FileInfo(fullPath);
+                file.Refresh();
+                foreach (StackAlignmentReferenceSkip skipped in result.Selection.Skipped)
+                {
+                    AddAttention($"Skipped this channel reference: {skipped.Reason}", skipped.Path);
+                }
+                ImageStackSessionCounts emptyCounts = await opened.GetCountsAsync(cancellationToken).ConfigureAwait(false);
+                if (emptyCounts.AcceptedFrames != 0 || emptyCounts.RejectedFrames != 0)
+                {
+                    throw new SeizaCoreException("The shared alignment stack did not start empty.");
+                }
+                ImageStackPushResult seed = await opened.PushFrameAsync(fullPath, cancellationToken).ConfigureAwait(false);
+                if (seed.NativeFailure || !seed.Disposition.Accepted)
+                {
+                    throw new SeizaCoreException("The selected channel reference could not start the stack. " + seed.Disposition.Reason);
+                }
+            }
+            else
+            {
+                opened = await ImageStackSession.OpenAsync(
+                    fullPath,
+                    _configuration.Options,
+                    _calibration,
+                    cancellationToken).ConfigureAwait(false);
+            }
             ImageStackSessionCounts counts = await opened
                 .GetCountsAsync(cancellationToken)
                 .ConfigureAwait(false);
@@ -1055,6 +1131,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         ImageStackCalibration replacement = CloneCalibration(_configuration.Calibration);
+        ValidateAlignmentCalibration(replacement);
         if (LiveStackCalibrationSelection.AreEquivalent(_calibration, replacement))
         {
             return;
@@ -1423,7 +1500,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
 
         if (_session is null)
         {
-            await OpenReferenceAsync(candidate, probe, candidateFilter, cancellationToken)
+            await OpenReferenceAsync(candidate, candidateFilter, cancellationToken)
                 .ConfigureAwait(false);
             return;
         }
@@ -1478,49 +1555,20 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
 
     private async Task OpenReferenceAsync(
         StackFileReadyCandidate candidate,
-        CalibrationFrameProbe probe,
         LiveStackFilterIdentity filter,
         CancellationToken cancellationToken)
     {
         SetCurrentCandidate(candidate.Path, "Opening the first light as the reference frame…");
-        ImageStackSession? session = null;
         try
         {
-            session = await ImageStackSession.OpenAsync(
-                candidate.Path,
-                _configuration.Options,
-                _calibration,
-                cancellationToken).ConfigureAwait(false);
-            ImageStackSessionCounts counts = await session
-                .GetCountsAsync(cancellationToken)
-                .ConfigureAwait(false);
-            if (counts.AcceptedFrames != 1)
+            if (!await OpenInitialReferenceAsync(candidate.Path, cancellationToken, [candidate]).ConfigureAwait(false))
             {
-                throw new SeizaCoreException(
-                    "The native live stack did not retain exactly one reference frame.");
+                CompleteReadFailure(candidate, "The first light changed while it was being opened.");
+                return;
             }
-
-            _session = session;
-            session = null;
-            lock (_stateSync)
-            {
-                _lockedFilter = filter;
-                _referenceSignature = probe.Signature with { };
-                _calibrationHistory.Add(CreateCalibrationEpoch(
-                    _calibration,
-                    1,
-                    _timeProvider.GetUtcNow()));
-            }
-            RecordTerminalFrame(
-                candidate,
-                LiveStackPersistedFrameDisposition.Accepted,
-                "Reference frame",
-                ValidExposure(probe.Signature.ExposureSeconds),
-                counts);
             _monitor.ReportProcessingResult(
                 candidate,
                 new StackFileProcessingResult(StackFileProcessingDisposition.Accepted));
-            await AfterAcceptedFrameAsync(cancellationToken).ConfigureAwait(false);
             if (!_checkpointBlocked)
             {
                 SetWatchingState(
@@ -1530,17 +1578,15 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            if (session is not null)
-            {
-                await session.DisposeAsync().ConfigureAwait(false);
-            }
             throw;
         }
         catch (Exception exception)
         {
-            if (session is not null)
+            if (_session is not null)
             {
-                await session.DisposeAsync().ConfigureAwait(false);
+                // The initial reference and its ledger already committed.
+                // A checkpoint failure must retain the resumability block.
+                throw;
             }
             CompleteReadFailure(candidate, exception.Message);
         }
@@ -2129,6 +2175,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                 .Concat(new[]
                 {
                     _configuration.InitialReferencePath,
+                    _alignmentReferencePath,
                     _calibration.BiasPath,
                     _calibration.DarkPath,
                     _calibration.FlatPath,
@@ -2141,12 +2188,29 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                 }.OfType<string>()))
                 .ToArray();
         }
-        if (sources.Any(source => PathsEqual(source, outputPath)) ||
-            LiveStackPath.IsWithinDirectory(outputPath, _store.GroupDirectory))
+        bool existingOutput = File.Exists(outputPath);
+        string? resolvedOutput = WindowsFileIdentity.TryResolveFinalPath(outputPath);
+        string? resolvedCheckpoints = WindowsFileIdentity.TryResolveFinalPath(_store.GroupDirectory);
+        if (sources.Any(source => PathsEqual(source, outputPath) ||
+                (existingOutput && StackSourceIdentity.RefersToSameFile(source, outputPath))) ||
+            LiveStackPath.IsWithinDirectory(outputPath, _store.GroupDirectory) ||
+            (resolvedOutput is not null && resolvedCheckpoints is not null &&
+                LiveStackPath.IsWithinDirectory(resolvedOutput, resolvedCheckpoints)))
         {
             throw new ArgumentException(
                 "The stack output cannot overwrite an input, calibration frame, or checkpoint.",
                 nameof(outputPath));
+        }
+    }
+
+    private void ValidateAlignmentCalibration(ImageStackCalibration calibration)
+    {
+        if (_alignmentReferencePath is not null &&
+            new[] { calibration.BiasPath, calibration.DarkPath, calibration.FlatPath }
+                .Any(path => LiveStackPath.Equals(path, _alignmentReferencePath)))
+        {
+            throw new ArgumentException("The shared alignment reference cannot also be a calibration master.",
+                nameof(calibration));
         }
     }
 
@@ -2178,6 +2242,9 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
             InitialReferencePath = string.IsNullOrWhiteSpace(source.InitialReferencePath)
             ? null
             : Path.GetFullPath(source.InitialReferencePath),
+            AlignmentReferencePath = string.IsNullOrWhiteSpace(source.AlignmentReferencePath)
+            ? null
+            : Path.GetFullPath(source.AlignmentReferencePath),
             Options = CloneOptions(source.Options),
             Calibration = CloneCalibration(source.Calibration),
         };

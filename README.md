@@ -5,7 +5,7 @@ It combines a modern WinUI 3 interface and GPU-backed viewport with the shared
 [Seiza](https://github.com/theatrus/seiza) Rust image, catalog, and solving
 core.
 
-[Download Seiza for Windows 0.8.0 (x64)](https://github.com/theatrus/seiza-win/releases/download/v0.8.0/seiza-0.8.0-windows-x86_64.msi)
+[Download Seiza for Windows 0.8.1 (x64)](https://github.com/theatrus/seiza-win/releases/download/v0.8.1/seiza-0.8.1-windows-x86_64.msi)
 · [Release notes and previous versions](https://github.com/theatrus/seiza-win/releases)
 
 **Also from Seiza:** [Core, CLI, and libraries](https://github.com/theatrus/seiza) ·
@@ -14,7 +14,27 @@ core.
 
 ![A solved NGC 7000 FITS image with WCS grid, catalog overlays, solution summary, and histogram inspector](docs/images/solved-overlays.png)
 
-## Seiza for Windows 0.8.0: parallax video
+## Seiza for Windows 0.8.1: shared-reference stacking and dust maps
+
+- Use one **shared alignment reference** across filter stacks so their FITS
+  outputs share dimensions and WCS, while each channel keeps its own reference
+  for calibration, brightness normalization, and noise weighting.
+- Automatic reference selection can try up to five native-ranked channel
+  lights and report why earlier candidates could not align. Live stacking
+  supports the same geometry-only reference and retains the saved grid on resume.
+- In the parallax editor, choose a custom dust-opacity map, reload it after
+  editing, reset to counted dust, or export a 16-bit PNG/TIFF or float FITS/XISF
+  map. Camera edits are preserved when changing dust; cancelled or failed
+  exports leave existing files and source images untouched.
+
+This version uses published Seiza 0.27.0, stacking 0.29.0, parallax 0.4.0 and
+image-io 0.2.0 crates, without vendored patches. See the
+[shared-reference guide](docs/STACKING-UPSTREAM.md) and
+[parallax guide](docs/PARALLAX-VIDEO.md).
+
+![Shared-reference controls in the native Windows stacking dialog](docs/images/stacking-shared-reference.jpg)
+
+## Parallax video introduced in 0.8.0
 
 The native Windows parallax editor follows [seiza-mac #56](https://github.com/theatrus/seiza-mac/pull/56):
 fly-in camera moves, generated and editable tours, depth-aware labels, offline
@@ -35,8 +55,8 @@ encoder availability, and safety details.
 - Parallax windows keep their private source snapshot and remain usable after
   the original viewer closes. Export cancellation preserves existing files.
 
-This version uses published Seiza 0.26.0, stacking 0.28.0, parallax 0.3.0 and
-image-io 0.1.0 crates, without vendored patches.
+Version 0.8.0 shipped with published Seiza 0.25.1, stacking 0.27.0 and parallax
+0.2.1 crates, without vendored patches.
 
 ![Native parallax workspace with aligned manual layers, solved coordinates and offline stellar distances](docs/images/parallax-video.jpg)
 
@@ -314,8 +334,8 @@ remaining macOS and Windows integration work.
 
 ## Install
 
-Download the [Seiza for Windows 0.8.0 x64 MSI](https://github.com/theatrus/seiza-win/releases/download/v0.8.0/seiza-0.8.0-windows-x86_64.msi).
-Its [SHA-256 checksums](https://github.com/theatrus/seiza-win/releases/download/v0.8.0/SHA256SUMS.txt)
+Download the [Seiza for Windows 0.8.1 x64 MSI](https://github.com/theatrus/seiza-win/releases/download/v0.8.1/seiza-0.8.1-windows-x86_64.msi).
+Its [SHA-256 checksums](https://github.com/theatrus/seiza-win/releases/download/v0.8.1/SHA256SUMS.txt)
 are published beside it. The installer places Seiza in
 `Program Files\Seiza for Windows` for every user, adds a shared Start Menu
 shortcut, and registers `.fit`, `.fits`, `.fts`, and `.xisf` with Windows
@@ -376,7 +396,7 @@ Build the self-contained all-users WiX MSI:
 ```powershell
 dotnet build packaging\windows\Seiza.App.wixproj `
   -c Release `
-  -p:SeizaVersion=0.8.0
+  -p:SeizaVersion=0.8.1
 ```
 
 The installer is written to `dist`. See the

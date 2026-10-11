@@ -84,10 +84,32 @@
                             <TextBlock Style="{ThemeResource BodyStrongTextBlockStyle}" Text="Reference frames" />
                             <TextBlock
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="Each stack is registered to its reference frame. Automatic selection scores the selected raw lights and chooses a sharp frame with a flat sky, independently for each filter."
+                                Text="Each filter's channel reference sets its brightness normalization and noise weighting. Automatic selection scores the selected raw lights and chooses a sharp frame with a flat sky."
                                 TextWrapping="Wrap" />
                             <ToggleSwitch x:Name="AutomaticReferenceToggle" Header="Choose reference frames automatically" IsOn="False" Toggled="Options_Changed" />
                             <StackPanel x:Name="ReferencePanel" Spacing="8" />
+                            <ToggleSwitch
+                                x:Name="SharedAlignmentToggle"
+                                Header="Use a shared alignment reference"
+                                IsOn="False"
+                                OffContent="Each stack uses its own pixel grid"
+                                OnContent="All stacks use one pixel grid and WCS"
+                                Toggled="Options_Changed" />
+                            <TextBlock
+                                x:Name="SharedAlignmentAvailabilityText"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                            <StackPanel x:Name="SharedAlignmentPanel" Spacing="8" Visibility="Collapsed">
+                                <TextBlock
+                                    x:Name="SharedAlignmentHelpText"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    TextWrapping="Wrap" />
+                                <TextBlock x:Name="AlignmentReferenceText" Text="First stack's channel reference" TextWrapping="Wrap" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Click="ChooseAlignmentReference_Click" Content="Choose image…" />
+                                    <Button Click="ClearAlignmentReference_Click" Content="Use first stack's reference" />
+                                </StackPanel>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
 

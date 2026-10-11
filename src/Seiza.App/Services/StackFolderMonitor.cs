@@ -395,6 +395,14 @@ internal sealed class StackFileCandidateTracker
         _excludedPaths = new HashSet<string>(
             options.ExcludedPaths.Select(LiveStackPath.NormalizeForComparison),
             StringComparer.OrdinalIgnoreCase);
+        // A geometry image or master may also be visible under a hard link
+        // or a junction spelling inside the capture folder. Both startup
+        // ranking and normal ingestion use this tracker, so seed immutable
+        // exclusions by identity before either can admit an alias.
+        foreach (string excluded in _excludedPaths)
+        {
+            AddTerminalIdentity(WindowsFileIdentity.TryGet(excluded));
+        }
         _excludedDirectories = options.ExcludedDirectories
             .Select(path => Path.TrimEndingDirectorySeparator(
                 LiveStackPath.NormalizeForComparison(path)))

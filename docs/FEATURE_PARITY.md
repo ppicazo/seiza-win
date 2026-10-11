@@ -74,14 +74,16 @@ test exist.
 | Stack SNR analysis | Available | **Complete** | Directory and live stacks measure the native accumulator at doubling depths plus the final depth and present noise improvement against the square-root ideal. Runtime-tested with four distinct 6,248 x 4,176, 30-second telescope FITS lights: measured noise fell from 41.76 at one frame to 19.83 at four frames, a 2.11x improvement against the ideal 2.00x. |
 | Resumable live folder stacking | Available | **Complete** | A native WinUI window watches and reconciles stable FITS/XISF arrivals, locks one compatible filter/camera geometry, renders bounded previews, snapshots or finishes FITS output, and checkpoints exact native online state with current/previous generation recovery. Runtime-tested end to end through pause, app relaunch, exact resume, new-file ingestion, a 104,371,200-byte non-destructive snapshot, final export, and completion-tombstone retirement. |
 
-## Parallax video (0.8.0)
+## Parallax video (0.8.x)
 
 This slice is audited against [seiza-mac #56](https://github.com/theatrus/seiza-mac/pull/56)
 at `48469d6f3588ac651cd13d3ba0689ac187583344` (2026-10-10), independently of the
 historical baseline above. It shipped in the 0.8.0 release on published
-`seiza-cabi 0.25.1` and `seiza-parallax 0.2.1`; it now uses `seiza-cabi 0.26.0`
-and `seiza-parallax 0.3.0`, which add dust maps, with no vendored renderer or
-crate patch.
+`seiza-cabi 0.25.1` and `seiza-parallax 0.2.1`; 0.8.1 uses published
+`seiza-cabi 0.27.0` and `seiza-parallax 0.4.0`, including dust maps, with no
+vendored renderer or crate patch. Dust-map round trips, live camera edits,
+source protection, cancellation and safe workspace closure have additional
+automated coverage beyond that original parity audit.
 
 | Capability | macOS #56 | Windows | Validation / remaining acceptance criterion |
 | --- | --- | --- | --- |
