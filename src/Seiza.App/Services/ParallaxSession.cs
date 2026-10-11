@@ -23,7 +23,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     private readonly List<string> _warnings = [], _notes = [];
     private WcsResult? _wcs;
     private ParallaxVideo? _scene, _preview;
-    private string? _starless, _stars;
+    private string? _starless, _stars, _starlessSourcePath, _starsSourcePath;
     private CancellationTokenSource? _operation, _refit, _playback;
     private Task? _refitTask, _frameTask;
     private int _revision, _frameRevision, _activeJobs, _catalogStatusRevision;
@@ -178,8 +178,8 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
             string copy = Path.Combine(_directory, Guid.NewGuid().ToString("N") + Path.GetExtension(path));
             await Task.Run(() => File.Copy(path, copy));
             if (_closed) return;
-            if (starless) { _starless = copy; StarlessName = Path.GetFileName(path); }
-            else { _stars = copy; StarsName = Path.GetFileName(path); }
+            if (starless) { _starless = copy; _starlessSourcePath = Path.GetFullPath(path); StarlessName = Path.GetFileName(path); }
+            else { _stars = copy; _starsSourcePath = Path.GetFullPath(path); StarsName = Path.GetFileName(path); }
             _layersAligned = false; Invalidate(true);
             Status = "Confirm that both layers match the source alignment and stretch.";
         }
@@ -209,11 +209,11 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public bool HasDustMap => _inputs.ContainsKey(ParallaxInputFile.DustMap);
     public bool CanReloadDustMap => HasDustMap && _scene is not null && !IsBusy && !_closed && Composition.Scene.Dust;
     public bool CanExportDustMap => (_preview ?? _scene) is not null && !IsBusy && !_closed;
-    public string DustDescription => Summary switch
+    public string DustDescription => !Composition.Scene.Dust ? "Dust dimming is off." : Summary switch
     {
         null => HasDustMap ? "The dust map applies when the scene is prepared." : "Dust is counted from the stars when the scene is prepared.",
         { DustGiven: true } summary => $"Dust from the map: {summary.StarsInFrontOfDust:N0} stars seen through opaque dust fly in front of the nebula.",
-        _ => Composition.Scene.Dust ? "Dust counted from the stars." : "Dust dimming is off.",
+        _ => "Dust counted from the stars.",
     };
     private async Task ChooseDustMapAsync(string path)
     {
@@ -240,30 +240,71 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     }
     private async Task<bool> SwapDustAsync(string? path, string message)
     {
-        // The latest camera, so the preview keeps its framing.
+        // A camera edit can still be in the debounce/native refit when the dust
+        // action starts. Capture that draft before Begin cancels its old refit.
         if ((_preview ?? _scene) is not { } source) return false;
-        var (signal, generation) = Begin(message);
+        bool refitCamera = _preview is null || _refitRequested || IsReconfiguring;
+        ParallaxVideoSettings? camera;
         try
         {
-            var video = await ParallaxCore.WithDustMapAsync(source, path, events: Events(generation), cancellationToken: signal.Token);
-            if (_closed || generation != _revision) { video.Dispose(); Finish(signal, null); return false; }
-            ReleasePreview(); _scene?.Dispose(); _scene = _preview = video; Summary = video.Summary;
+            if (refitCamera && Composition.ValidationMessage is string invalid) throw new InvalidDataException(invalid);
+            camera = refitCamera ? Composition.VideoSettings(true) : null;
+        }
+        catch (Exception e) { Error = e.Message; Notify(); return false; }
+        var (signal, generation) = Begin(message);
+        ParallaxVideo? updated = null;
+        try
+        {
+            updated = await ParallaxCore.WithDustMapAsync(source, path, events: Events(generation), cancellationToken: signal.Token);
+            if (camera is not null)
+            {
+                var fitted = await ParallaxCore.ReconfigureAsync(updated, camera, events: Events(generation), cancellationToken: signal.Token);
+                updated.Dispose(); updated = fitted;
+            }
+            signal.Token.ThrowIfCancellationRequested();
+            if (_closed || generation != _revision) throw new OperationCanceledException(signal.Token);
+            ReleasePreview(); _scene?.Dispose(); _scene = _preview = updated; Summary = updated.Summary;
+            updated = null; // Both session references own the one immutable video.
             Status = DustDescription;
             Finish(signal, null); RequestFrame();
             return true;
         }
-        catch (Exception e) { Finish(signal, e); return false; }
+        catch (Exception e)
+        {
+            bool cancelled = signal.IsCancellationRequested || e is OperationCanceledException;
+            Finish(signal, e);
+            // A refused map must not silently discard a camera edit that was
+            // already waiting for automatic preview when this action began.
+            if (refitCamera && !cancelled) ScheduleRefit();
+            return false;
+        }
+        finally { updated?.Dispose(); }
     }
     public async Task ExportDustMapAsync(string path)
     {
         if (!CanExportDustMap || (_preview ?? _scene) is not { } video) return;
+        string?[] protectedPaths = [_sourcePath, _starlessSourcePath, _starsSourcePath, SnapshotPath, _starless, _stars, .. _inputs.Values];
+        bool resumeRefit = _preview is null || _refitRequested || IsReconfiguring;
+        var (signal, generation) = Begin("Exporting the dust map…");
         try
         {
-            bool written = await Task.Run(() => video.WriteDustMap(path));
-            if (!_closed) Status = written ? $"Dust map written to {Path.GetFileName(path)}." : "This scene has no dust to export: dust dimming is off, or too few stars show to map it.";
+            string destination = ParallaxDustMapOutput.ValidateDestination(path, protectedPaths);
+            // The native writer has no cancellation parameter: keep this job
+            // tracked and await its completion before releasing session files.
+            // WriteDustMap checks cancellation before atomic publication.
+            bool written = await Task.Run(() => video.WriteDustMap(destination, cancellationToken: signal.Token));
+            signal.Token.ThrowIfCancellationRequested();
+            if (_closed || generation != _revision) throw new OperationCanceledException(signal.Token);
+            Status = written ? $"Dust map written to {Path.GetFileName(destination)}." : "This scene has no dust to export: dust dimming is off, or too few stars show to map it.";
+            Finish(signal, null);
+            if (resumeRefit) ScheduleRefit();
         }
-        catch (Exception e) { if (!_closed) Error = e.Message; }
-        Notify();
+        catch (Exception e)
+        {
+            bool cancelled = signal.IsCancellationRequested || e is OperationCanceledException;
+            Finish(signal, e);
+            if (resumeRefit && !cancelled) ScheduleRefit();
+        }
     }
     public void PickDistanceReference() { PickingDestination = false; PickingDistance = true; ShowsSource = true; Notify(); }
     public void Pick(double x, double y)

@@ -72,7 +72,9 @@ behind can show, so a star seen there flies in front of the nebula.
 - **Export Dust Map…** writes the dust in use, the size of the image: a 16-bit
   PNG or TIFF, or a 32-bit float FITS or XISF. Paint over it in an image editor.
   An exported counted map can carry small opaque specks in clear sky; paint
-  them out, or the stars under them fly forward.
+  them out, or the stars under them fly forward. Exports cannot replace source
+  images or selected inputs; a failed or cancelled export leaves an existing
+  destination unchanged.
 - **Choose…** under *dust map* applies a map. On a prepared scene only the dust
   changes: the scene is not prepared again, and the preview keeps its camera.
 - **Reload** reads the chosen map again after it was edited elsewhere.

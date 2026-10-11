@@ -243,7 +243,151 @@ public sealed class ParallaxCoreTests
         Assert.Throws<ArgumentException>(() => ParallaxCore.WithDustMap(original, new float[3], 2, 2));
     }
 
-    private sealed class Fixture : IDisposable
+    [Theory]
+    [InlineData("png")]
+    [InlineData("tif")]
+    [InlineData("fits")]
+    [InlineData("xisf")]
+    public void DustMapExportsRoundTripAsymmetricGradientsWithoutFlippingOrLosingPrecision(string extension)
+    {
+        using var fixture = new Fixture();
+        using var original = ParallaxCore.Prepare(fixture.Request);
+        using var painted = ParallaxCore.WithDustMap(original, DustGradient(), 12, 8);
+        float[] expected = Assert.IsType<float[]>(painted.DustMap(4, 3));
+        // Unequal gradients on both axes catch a flipped FITS row order, a
+        // transpose, or an accidental conversion to 8-bit display pixels.
+        Assert.True(expected[0] < expected[3]);
+        Assert.True(expected[0] < expected[8]);
+        Assert.NotEqual(expected[3] - expected[0], expected[8] - expected[0]);
+        string path = fixture.PathFor("gradient." + extension);
+        Assert.True(painted.WriteDustMap(path));
+
+        using var restored = ParallaxCore.WithDustMap(original, path);
+        Assert.True(restored.Summary.DustGiven);
+        AssertDustMapClose(expected, Assert.IsType<float[]>(restored.DustMap(4, 3)));
+        Assert.Null(restored.DustMap(4, 3, counted: true));
+        Assert.Equal(66 * 48 * 4, restored.RenderBgraFrame(0).Length);
+    }
+
+    [Fact]
+    public void PreparingWithDustMapMatchesSwappingAndRejectsDustDisabledRequests()
+    {
+        using var fixture = new Fixture();
+        using var original = ParallaxCore.Prepare(fixture.Request);
+        using var painted = ParallaxCore.WithDustMap(original, Enumerable.Repeat(1f, 12 * 8).ToArray(), 12, 8);
+        string path = fixture.PathFor("prepared-dust.png");
+        Assert.True(painted.WriteDustMap(path));
+        using var swapped = ParallaxCore.WithDustMap(original, path);
+
+        fixture.Request.Inputs.DustMap = path;
+        using var prepared = ParallaxCore.Prepare(fixture.Request);
+        Assert.True(prepared.Summary.DustGiven);
+        Assert.Equal(swapped.Summary.StarsInFrontOfDust, prepared.Summary.StarsInFrontOfDust);
+        Assert.True(prepared.Summary.StarsInFrontOfDust > 0);
+        AssertDustMapClose(Assert.IsType<float[]>(swapped.DustMap(4, 3)), Assert.IsType<float[]>(prepared.DustMap(4, 3)));
+        Assert.Equal(swapped.RenderBgraFrame(2), prepared.RenderBgraFrame(2));
+
+        fixture.Request.Scene.Dust = false;
+        var error = Assert.Throws<SeizaCoreException>(() => ParallaxCore.Prepare(fixture.Request));
+        Assert.Contains("dust", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(66 * 48 * 4, original.RenderBgraFrame(0).Length);
+    }
+
+    [Fact]
+    public void ReconfigurationKeepsDustAfterTheMapAndSourceFilesAreRemovedAndOriginalIsDisposed()
+    {
+        using var fixture = new Fixture();
+        using var original = ParallaxCore.Prepare(fixture.Request);
+        using var painted = ParallaxCore.WithDustMap(original, DustGradient(), 12, 8);
+        string path = fixture.PathFor("camera-dust.xisf");
+        Assert.True(painted.WriteDustMap(path));
+        using var fromFile = ParallaxCore.WithDustMap(original, path);
+        float[] expected = Assert.IsType<float[]>(fromFile.DustMap(4, 3));
+        File.Delete(path);
+        File.Delete(fixture.Request.Inputs.Starless!);
+        File.Delete(fixture.Request.Inputs.Stars!);
+
+        using var refitted = ParallaxCore.Reconfigure(fromFile, fixture.Request.Video with { Size = "80x60", Zoom = 1.1 });
+        fromFile.Dispose(); painted.Dispose(); original.Dispose();
+        Assert.True(refitted.Summary.DustGiven);
+        AssertDustMapClose(expected, Assert.IsType<float[]>(refitted.DustMap(4, 3)));
+        Assert.Equal(80 * 60 * 4, refitted.RenderBgraFrame(2).Length);
+        using var counted = ParallaxCore.WithDustMap(refitted, (string?)null);
+        Assert.False(counted.Summary.DustGiven);
+        Assert.Null(counted.DustMap(4, 3));
+        Assert.Equal(80 * 60 * 4, counted.RenderBgraFrame(2).Length);
+    }
+
+    [Theory]
+    [InlineData(float.NaN)]
+    [InlineData(float.PositiveInfinity)]
+    [InlineData(float.NegativeInfinity)]
+    [InlineData(-0.01f)]
+    [InlineData(1.01f)]
+    public void InvalidDustOpacityLeavesTheOriginalSceneUnchanged(float invalid)
+    {
+        using var fixture = new Fixture();
+        using var original = ParallaxCore.Prepare(fixture.Request);
+        byte[] before = original.RenderBgraFrame(2);
+        float[] opacity = DustGradient();
+        opacity[42] = invalid;
+        var error = Assert.Throws<SeizaCoreException>(() => ParallaxCore.WithDustMap(original, opacity, 12, 8));
+        Assert.Contains("opacity", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(before, original.RenderBgraFrame(2));
+        Assert.False(original.Summary.DustGiven);
+        using var retry = ParallaxCore.WithDustMap(original, DustGradient(), 12, 8);
+        Assert.True(retry.Summary.DustGiven);
+    }
+
+    [Fact]
+    public void DustSwapCancellationAndCallbackFailuresKeepTheOriginalUsable()
+    {
+        using var fixture = new Fixture();
+        using var original = ParallaxCore.Prepare(fixture.Request);
+        byte[] before = original.RenderBgraFrame(2);
+        using var cancellation = new CancellationTokenSource();
+        int callbacks = 0;
+        Assert.Throws<OperationCanceledException>(() => ParallaxCore.WithDustMap(original, DustGradient(), 12, 8,
+            new InlineProgress<ParallaxEvent>(_ => { callbacks++; cancellation.Cancel(); }), cancellation.Token));
+        Assert.True(callbacks > 0);
+        Assert.Equal(before, original.RenderBgraFrame(2));
+
+        var expected = new InvalidOperationException("Synthetic dust callback failure");
+        var actual = Assert.Throws<InvalidOperationException>(() => ParallaxCore.WithDustMap(original, DustGradient(), 12, 8,
+            new InlineProgress<ParallaxEvent>(_ => throw expected)));
+        Assert.Same(expected, actual);
+        Assert.Equal(before, original.RenderBgraFrame(2));
+        Assert.Throws<SeizaCoreException>(() => ParallaxCore.WithDustMap(original, fixture.PathFor("missing-dust.png")));
+        Assert.Equal(before, original.RenderBgraFrame(2));
+        using var retry = ParallaxCore.WithDustMap(original, DustGradient(), 12, 8);
+        Assert.True(retry.Summary.DustGiven);
+    }
+
+    [Fact]
+    public void DustSwapKeepsItsNativeInputLeaseAliveWhenAProgressCallbackDisposesTheOriginal()
+    {
+        using var fixture = new Fixture();
+        using var original = ParallaxCore.Prepare(fixture.Request);
+        bool called = false;
+        using var painted = ParallaxCore.WithDustMap(original, DustGradient(), 12, 8,
+            new InlineProgress<ParallaxEvent>(_ => { called = true; original.Dispose(); }));
+        Assert.True(called);
+        Assert.True(painted.Summary.DustGiven);
+        Assert.Equal(66 * 48 * 4, painted.RenderBgraFrame(2).Length);
+        Assert.Throws<ObjectDisposedException>(() => original.RenderBgraFrame(2));
+    }
+
+    private static float[] DustGradient() => Enumerable.Range(0, 12 * 8)
+        .Select(index => 0.1f + 0.5f * (index % 12) / 11 + 0.25f * (index / 12) / 7).ToArray();
+
+    private static void AssertDustMapClose(float[] expected, float[] actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        for (int index = 0; index < expected.Length; index++)
+            Assert.InRange(Math.Abs(expected[index] - actual[index]), 0f, 0.0001f);
+    }
+
+    internal sealed class Fixture : IDisposable
     {
         private readonly string _directory = Path.Combine(Path.GetTempPath(), "Seiza.App.Tests", "parallax-" + Guid.NewGuid().ToString("N"));
         internal ParallaxRequest Request { get; }

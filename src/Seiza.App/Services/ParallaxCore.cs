@@ -37,10 +37,12 @@ internal static class ParallaxCore
 
     public static unsafe ParallaxVideo Prepare(ParallaxRequest request, IProgress<ParallaxEvent>? events = null, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
+        string[] protectedPaths = CaptureInputPaths(request.Inputs);
         using var scope = new EventScope(events, cancellationToken);
         nint result = NativeMethods.PrepareParallaxJson(request.ToJson(), scope.Signal, &ReceiveEvent, scope.Context, out nint error);
-        return FinishVideo(result, error, scope);
+        return FinishVideo(result, error, scope, protectedPaths);
     }
 
     public static unsafe ParallaxVideo Reconfigure(ParallaxVideo video, ParallaxVideoSettings settings, IProgress<ParallaxEvent>? events = null, CancellationToken cancellationToken = default)
@@ -49,7 +51,7 @@ internal static class ParallaxCore
         cancellationToken.ThrowIfCancellationRequested();
         using var scope = new EventScope(events, cancellationToken);
         nint result = NativeMethods.ReconfigureParallaxJson(video.Handle, settings.ToJson(), scope.Signal, &ReceiveEvent, scope.Context, out nint error);
-        return FinishVideo(result, error, scope);
+        return FinishVideo(result, error, scope, video.ProtectedPaths);
     }
 
     // A new video of the same scene and camera with the dust map at `path`
@@ -62,7 +64,7 @@ internal static class ParallaxCore
         cancellationToken.ThrowIfCancellationRequested();
         using var scope = new EventScope(events, cancellationToken);
         nint result = NativeMethods.WithParallaxDustMapJson(video.Handle, ParallaxJson.SerializeDustMapPath(path), scope.Signal, &ReceiveEvent, scope.Context, out nint error);
-        return FinishVideo(result, error, scope);
+        return FinishVideo(result, error, scope, path is null ? video.ProtectedPaths : [.. video.ProtectedPaths, path]);
     }
 
     // As above with the map painted in memory: `opacity` is `width` × `height`
@@ -77,10 +79,17 @@ internal static class ParallaxCore
         nint result, error;
         fixed (float* values = opacity)
             result = NativeMethods.WithParallaxDustMap(video.Handle, values, checked((uint)width), checked((uint)height), scope.Signal, &ReceiveEvent, scope.Context, out error);
-        return FinishVideo(result, error, scope);
+        return FinishVideo(result, error, scope, video.ProtectedPaths);
     }
 
-    private static ParallaxVideo FinishVideo(nint result, nint error, EventScope scope)
+    private static string[] CaptureInputPaths(ParallaxInputs inputs) =>
+        new[] { inputs.Image, inputs.Starless, inputs.Stars, inputs.DustMap, inputs.Objects,
+            inputs.ObjectDistances, inputs.StarDistances, inputs.GaiaCache, inputs.RcAstroExecutable }
+        .Where(path => !string.IsNullOrWhiteSpace(path))
+        .Select(path => LiveStackPath.NormalizeForComparison(path!))
+        .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+    private static ParallaxVideo FinishVideo(nint result, nint error, EventScope scope, IReadOnlyList<string> protectedPaths)
     {
         Exception? failure = error == 0 ? null : NativeString.TakeError(error, "Could not prepare the parallax video.");
         using var owner = new SafeParallaxVideoHandle(result);
@@ -88,7 +97,7 @@ internal static class ParallaxCore
         if (owner.IsInvalid) throw failure ?? new SeizaCoreException("Could not prepare the parallax video.");
         // Transfer only after summary validation has succeeded. On any failure,
         // the temporary owner releases the pointer exactly once.
-        var video = new ParallaxVideo(owner);
+        var video = new ParallaxVideo(owner, protectedPaths);
         owner.SetHandleAsInvalid();
         try { scope.Check(); return video; }
         catch { video.Dispose(); throw; }
@@ -150,13 +159,14 @@ internal static class ParallaxCore
 internal sealed class ParallaxVideo : IDisposable
 {
     internal SafeParallaxVideoHandle Handle { get; }
+    internal IReadOnlyList<string> ProtectedPaths { get; }
     public ParallaxSummary Summary { get; }
     public int Width => Summary.Width;
     public int Height => Summary.Height;
     public int FramesPerSecond => Summary.Fps;
     public int FrameCount => Summary.Frames;
 
-    internal ParallaxVideo(SafeParallaxVideoHandle borrowedOwner)
+    internal ParallaxVideo(SafeParallaxVideoHandle borrowedOwner, IReadOnlyList<string> protectedPaths)
     {
         nint result = NativeMethods.GetParallaxSummaryJson(borrowedOwner, out nint error);
         if (result == 0) throw NativeString.TakeError(error, "The parallax summary was empty.");
@@ -169,6 +179,8 @@ internal sealed class ParallaxVideo : IDisposable
             Summary.BackgroundFocus is null || Summary.BackgroundFocus.Length != 2 || !Summary.BackgroundFocus.All(double.IsFinite) ||
             !double.IsFinite(Summary.BackgroundDistanceParsecs) || Summary.BackgroundDistanceParsecs <= 0 || Summary.Fit is null)
             throw new InvalidDataException("The native parallax video has an unsupported size, timing or summary.");
+        ProtectedPaths = Array.AsReadOnly(protectedPaths.Select(LiveStackPath.NormalizeForComparison)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
         Handle = new SafeParallaxVideoHandle(borrowedOwner.DangerousGetHandle());
     }
 
@@ -215,12 +227,20 @@ internal sealed class ParallaxVideo : IDisposable
     // Write the dust to `path`, white opaque, in the format its extension
     // names: 16-bit PNG or TIFF, or 32-bit float FITS or XISF, the size of
     // the image. False when there is no such dust to write.
-    public bool WriteDustMap(string path, bool counted = false)
+    public bool WriteDustMap(string path, bool counted = false, CancellationToken cancellationToken = default) =>
+        ParallaxDustMapOutput.Write(path, ProtectedPaths, staging => WriteDustMapFile(staging, counted), cancellationToken);
+
+    private bool WriteDustMapFile(string path, bool counted)
     {
         int result = NativeMethods.WriteParallaxDustMapJson(Handle, ParallaxJson.SerializeDustMapWrite(path, counted), out nint error);
         if (result < 0) throw NativeString.TakeError(error, "Could not write the dust map.");
         if (error != 0) NativeMethods.FreeString(error);
-        return result == 1;
+        return result switch
+        {
+            0 => false,
+            1 => true,
+            _ => throw new InvalidDataException("The native dust-map writer returned an unsupported result."),
+        };
     }
 
     public void Dispose() => Handle.Dispose();

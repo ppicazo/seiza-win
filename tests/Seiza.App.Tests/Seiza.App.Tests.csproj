@@ -33,6 +33,8 @@
     <Compile Include="..\..\src\Seiza.App\Models\ParallaxModels.cs" Link="Models\ParallaxModels.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\ParallaxJson.cs" Link="Models\ParallaxJson.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ParallaxCore.cs" Link="Services\ParallaxCore.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\ParallaxDustMapOutput.cs" Link="Services\ParallaxDustMapOutput.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\WindowsFileIdentity.cs" Link="Services\WindowsFileIdentity.cs" />
     <Compile Include="..\..\src\Seiza.App\Interop\NativeMethods.Parallax.cs" Link="Interop\NativeMethods.Parallax.cs" />
     <Compile Include="..\..\src\Seiza.App\Interop\SafeParallaxVideoHandle.cs" Link="Interop\SafeParallaxVideoHandle.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\FitsBackground.cs" Link="Models\FitsBackground.cs" />
@@ -51,6 +53,7 @@
     <Compile Include="..\..\src\Seiza.App\Models\CalibrationFrames.cs" Link="Models\CalibrationFrames.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\CalibrationPreparation.cs" Link="Models\CalibrationPreparation.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\LiveStackSessionPersistence.cs" Link="Models\LiveStackSessionPersistence.cs" />
+    <Compile Include="..\..\src\Seiza.App\Models\LiveStackPath.cs" Link="Models\LiveStackPath.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\LiveStackRun.cs" Link="Models\LiveStackRun.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\StackSnrPresentation.cs" Link="Models\StackSnrPresentation.cs" />
     <Compile Include="..\..\src\Seiza.App\Rendering\ImageSpaceTransform.cs" Link="Rendering\ImageSpaceTransform.cs" />
