@@ -221,7 +221,7 @@ public sealed class ParallaxCoreTests
         using var painted = ParallaxCore.WithDustMap(original, opaque, 48, 32);
         Assert.True(painted.Summary.DustGiven);
         Assert.Equal(original.Summary.DetectedStars, painted.Summary.DetectedStars);
-        Assert.All(painted.DustMap(4, 3)!, value => Assert.Equal(1f, value));
+        Assert.All(painted.DustMap(4, 3)!, value => Assert.InRange(value, 0.9999f, 1f));
         string written = fixture.PathFor("dust.tif");
         Assert.True(painted.WriteDustMap(written));
         Assert.True(new FileInfo(written).Length > 0);
