@@ -22,11 +22,28 @@ internal sealed class ImageStackSnapshot : IDisposable, IAsyncDisposable
 
     public int RejectedFrames { get; }
 
+    public Task WriteFitsAsync(
+        string outputPath,
+        CancellationToken cancellationToken = default) =>
+        WriteFitsAsync(outputPath, null, null, cancellationToken);
+
+    public Task WriteFitsAsync(
+        string outputPath,
+        IReadOnlyList<string>? additionalProtectedPaths,
+        CancellationToken cancellationToken = default) =>
+        WriteFitsAsync(outputPath, additionalProtectedPaths, null, cancellationToken);
+
     public async Task WriteFitsAsync(
         string outputPath,
+        IReadOnlyList<string>? additionalProtectedPaths,
+        Action? validateDestination,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
+        outputPath = Path.GetFullPath(outputPath);
+        string[] protectedPaths = additionalProtectedPaths is null
+            ? _protectedPaths
+            : [.. _protectedPaths, .. additionalProtectedPaths];
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -36,7 +53,12 @@ internal sealed class ImageStackSnapshot : IDisposable, IAsyncDisposable
             {
                 // The native writer sees a staging filename. Guard the final
                 // destination too, before atomic publication can replace it.
-                StackOutputProtection.ValidateDestination(outputPath, _protectedPaths);
+                void ValidateDestination()
+                {
+                    StackOutputProtection.ValidateDestination(outputPath, protectedPaths);
+                    validateDestination?.Invoke();
+                }
+                ValidateDestination();
                 AtomicOutputFile.Write(
                     outputPath,
                     stagingPath =>
@@ -52,6 +74,7 @@ internal sealed class ImageStackSnapshot : IDisposable, IAsyncDisposable
                                 "The Seiza core could not write the stacked image.");
                         }
                     },
+                    ValidateDestination,
                     cancellationToken);
             }, CancellationToken.None).ConfigureAwait(false);
         }

@@ -38,7 +38,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
             ? StackingCoreCapabilities.Current.SupportsReferenceImageCandidates
                 ? "A common grid keeps separate filter outputs aligned for color combination."
                 : "This core supports a common grid, but not automatic alignment fallback. Only the chosen channel light is tried."
-            : "Shared alignment is waiting for the next published Seiza core crates; this build keeps independent stack grids.";
+            : "Shared alignment needs published Seiza core 0.27.0 or later. Update Seiza; independent grids remain available.";
         SharedAlignmentHelpText.Text = "Use the first stack's channel reference for the common grid, or choose a FITS/XISF image of the same field. " +
             "This image is not calibrated or added to the stack unless it is also a selected light. Each filter still uses its own channel reference and calibration masters. " +
             (StackingCoreCapabilities.Current.SupportsReferenceImageCandidates
@@ -286,7 +286,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         }
         if (SharedAlignmentToggle.IsOn && !StackingCoreCapabilities.Current.SupportsReferenceImage)
         {
-            return "Shared alignment requires the upcoming published Seiza core crates.";
+            return "Update Seiza to use published core 0.27.0 or later for shared alignment.";
         }
         if (SharedAlignmentToggle.IsOn && _alignmentReferencePath is not null &&
             !File.Exists(_alignmentReferencePath))

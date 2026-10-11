@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using Seiza.App.Services;
 
 namespace Seiza.App.Models;
 
@@ -463,7 +464,11 @@ internal static class ImageStackValidation
         string[] outputs = jobs
             .Select(job => LiveStackPath.NormalizeForComparison(job.Request.OutputPath))
             .ToArray();
-        if (outputs.Distinct(StringComparer.OrdinalIgnoreCase).Count() != outputs.Length)
+        string[] existingOutputs = outputs.Where(File.Exists).ToArray();
+        if (outputs.Distinct(StringComparer.OrdinalIgnoreCase).Count() != outputs.Length ||
+            existingOutputs.Select((output, index) =>
+                existingOutputs.Skip(index + 1).Any(other =>
+                    StackSourceIdentity.RefersToSameFile(output, other))).Any(equivalent => equivalent))
         {
             throw new ArgumentException(
                 "Each filter stack must use a different output file.",
@@ -471,15 +476,23 @@ internal static class ImageStackValidation
         }
 
         var sources = new HashSet<string>(
-            jobs.SelectMany(job => SourcePaths(job.Request)).Select(LiveStackPath.NormalizeForComparison),
+            GetProtectedSourcePaths(jobs),
             StringComparer.OrdinalIgnoreCase);
-        if (outputs.Any(sources.Contains))
+        if (outputs.Any(output => sources.Contains(output) ||
+            (File.Exists(output) && sources.Any(source =>
+                StackSourceIdentity.RefersToSameFile(output, source)))))
         {
             throw new ArgumentException(
                 "Choose output files that are not input or calibration files in this batch, including alignment reference images.",
                 nameof(jobs));
         }
     }
+
+    internal static string[] GetProtectedSourcePaths(IReadOnlyList<ImageStackJob> jobs) =>
+        jobs.SelectMany(job => SourcePaths(job.Request))
+            .Select(LiveStackPath.NormalizeForComparison)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
     private static void ValidateRequest(ImageStackRequest request)
     {

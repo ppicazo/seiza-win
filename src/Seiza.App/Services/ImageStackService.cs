@@ -10,6 +10,7 @@ internal static class ImageStackService
         CancellationToken cancellationToken = default)
     {
         ImageStackValidation.ValidateBatch(jobs);
+        string[] protectedBatchSourcePaths = ImageStackValidation.GetProtectedSourcePaths(jobs);
         foreach (ImageStackJob job in jobs.Where(job => job.Request.AlignmentReferencePath is not null))
         {
             // Fail before any earlier group can write an output when a
@@ -30,8 +31,15 @@ internal static class ImageStackService
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                // An output that does not exist yet can still alias another
+                // group's eventual output through a directory junction. Once
+                // the first is published, later final-name checks must retain it.
+                string[] protectedJobPaths = [.. protectedBatchSourcePaths,
+                    .. jobs.Where(other => !ReferenceEquals(other, job))
+                        .Select(other => other.Request.OutputPath)];
                 result = await StackAsync(
                     job.Request,
+                    protectedJobPaths,
                     update => progress?.Report(update with
                     {
                         Message = jobs.Count > 1
@@ -67,6 +75,7 @@ internal static class ImageStackService
 
     private static async Task<ImageStackResult> StackAsync(
         ImageStackRequest request,
+        IReadOnlyList<string> protectedBatchSourcePaths,
         Action<ImageStackProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -221,7 +230,7 @@ internal static class ImageStackService
             await using (finished)
             {
                 ImageStackSnapshot output = cleaned ?? finished!;
-                await output.WriteFitsAsync(request.OutputPath, cancellationToken)
+                await output.WriteFitsAsync(request.OutputPath, protectedBatchSourcePaths, cancellationToken)
                     .ConfigureAwait(false);
 
                 return new ImageStackResult(

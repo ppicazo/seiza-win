@@ -439,7 +439,8 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                 {
                     // The native snapshot owns its pixels, so folder ingestion
                     // may continue while the potentially large FITS is written.
-                    await snapshot.WriteFitsAsync(fullOutputPath, cancellationToken)
+                    await snapshot.WriteFitsAsync(fullOutputPath,
+                        () => EnsureSafeOutputPath(fullOutputPath), cancellationToken)
                         .ConfigureAwait(false);
                     outputWritten = true;
                     _monitor.CommitReservedPath(fullOutputPath);
@@ -591,7 +592,8 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                 await using (snapshot)
                 {
                     ImageStackSnapshot output = cleaned ?? snapshot;
-                    await output.WriteFitsAsync(fullOutputPath, cancellationToken)
+                    await output.WriteFitsAsync(fullOutputPath, null,
+                        () => EnsureSafeOutputPath(fullOutputPath), cancellationToken)
                         .ConfigureAwait(false);
                     _monitor.SeedProcessedPaths([fullOutputPath]);
                     lock (_stateSync)
@@ -2186,8 +2188,14 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                 }.OfType<string>()))
                 .ToArray();
         }
-        if (sources.Any(source => PathsEqual(source, outputPath)) ||
-            LiveStackPath.IsWithinDirectory(outputPath, _store.GroupDirectory))
+        bool existingOutput = File.Exists(outputPath);
+        string? resolvedOutput = WindowsFileIdentity.TryResolveFinalPath(outputPath);
+        string? resolvedCheckpoints = WindowsFileIdentity.TryResolveFinalPath(_store.GroupDirectory);
+        if (sources.Any(source => PathsEqual(source, outputPath) ||
+                (existingOutput && StackSourceIdentity.RefersToSameFile(source, outputPath))) ||
+            LiveStackPath.IsWithinDirectory(outputPath, _store.GroupDirectory) ||
+            (resolvedOutput is not null && resolvedCheckpoints is not null &&
+                LiveStackPath.IsWithinDirectory(resolvedOutput, resolvedCheckpoints)))
         {
             throw new ArgumentException(
                 "The stack output cannot overwrite an input, calibration frame, or checkpoint.",

@@ -403,7 +403,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         {
             if (!StackingCoreCapabilities.Current.SupportsReferenceImage)
             {
-                return "This Seiza core does not support shared alignment references.";
+                return "Shared alignment needs published Seiza core 0.27.0 or later. Update Seiza to use it.";
             }
             if (!File.Exists(alignmentPath))
             {
@@ -411,7 +411,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
             }
             if (AutomaticReferenceToggle.IsOn && !StackingCoreCapabilities.Current.SupportsReferenceImageCandidates)
             {
-                return "Automatic shared-reference fallback needs a newer Seiza core. Choose a manual channel reference or update the core.";
+                return "Automatic shared-reference fallback needs published Seiza core 0.27.0 or later. Choose a manual channel reference or update Seiza.";
             }
             if (new[] { calibration.BiasPath, calibration.DarkPath, calibration.FlatPath }
                 .Any(path => LiveStackPath.Equals(path, alignmentPath)))

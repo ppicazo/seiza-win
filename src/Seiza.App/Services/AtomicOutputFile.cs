@@ -5,6 +5,13 @@ internal static class AtomicOutputFile
     public static void Write(
         string destinationPath,
         Action<string> writeStagingFile,
+        CancellationToken cancellationToken) =>
+        Write(destinationPath, writeStagingFile, null, cancellationToken);
+
+    public static void Write(
+        string destinationPath,
+        Action<string> writeStagingFile,
+        Action? validateDestination,
         CancellationToken cancellationToken)
     {
         string destination = Path.GetFullPath(destinationPath);
@@ -14,6 +21,10 @@ internal static class AtomicOutputFile
         try
         {
             writeStagingFile(staging);
+            cancellationToken.ThrowIfCancellationRequested();
+            // Sources or directory aliases may have appeared while the native
+            // writer was running. Recheck the final name after staging closes.
+            validateDestination?.Invoke();
             cancellationToken.ThrowIfCancellationRequested();
             File.Move(staging, destination, overwrite: true);
         }

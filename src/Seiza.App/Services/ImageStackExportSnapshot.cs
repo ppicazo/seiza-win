@@ -30,11 +30,18 @@ internal sealed class ImageStackExportSnapshot : IDisposable, IAsyncDisposable
 
     public int RejectedFrames { get; }
 
+    public Task WriteFitsAsync(
+        string outputPath,
+        CancellationToken cancellationToken = default) =>
+        WriteFitsAsync(outputPath, null, cancellationToken);
+
     public async Task WriteFitsAsync(
         string outputPath,
+        Action? validateDestination,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
+        outputPath = Path.GetFullPath(outputPath);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -43,7 +50,12 @@ internal sealed class ImageStackExportSnapshot : IDisposable, IAsyncDisposable
             await Task.Run(() =>
             {
                 // Native source protection cannot see beyond our staging file.
-                StackOutputProtection.ValidateDestination(outputPath, _protectedPaths);
+                void ValidateDestination()
+                {
+                    StackOutputProtection.ValidateDestination(outputPath, _protectedPaths);
+                    validateDestination?.Invoke();
+                }
+                ValidateDestination();
                 AtomicOutputFile.Write(
                     outputPath,
                     stagingPath =>
@@ -59,6 +71,7 @@ internal sealed class ImageStackExportSnapshot : IDisposable, IAsyncDisposable
                                 "The Seiza core could not write the live-stack snapshot.");
                         }
                     },
+                    ValidateDestination,
                     cancellationToken);
             }, CancellationToken.None).ConfigureAwait(false);
         }

@@ -3,7 +3,7 @@ using Seiza.App.Interop;
 
 namespace Seiza.App.Services;
 
-/// <summary>Probe exports, not version strings: unreleased APIs may share a version.</summary>
+/// <summary>Probe actual exports so compatibility does not depend on version strings.</summary>
 internal sealed record StackingCoreCapabilities(
     bool SupportsReferenceImage,
     bool SupportsReferenceImageCandidates)
@@ -20,9 +20,9 @@ internal sealed record StackingCoreCapabilities(
             throw new SeizaCoreException(
                 needsFallback
                     ? "The installed Seiza core does not support automatic alignment-reference fallback. " +
-                      "This feature requires the upcoming published stacking crates."
+                      "Update Seiza to use published core 0.27.0 or later."
                     : "The installed Seiza core does not support a shared alignment reference image. " +
-                      "This feature requires the upcoming published stacking crates.");
+                      "Update Seiza to use published core 0.27.0 or later.");
         }
     }
 
