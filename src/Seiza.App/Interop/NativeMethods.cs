@@ -122,6 +122,35 @@ internal static partial class NativeMethods
 
     [LibraryImport(
         LibraryName,
+        EntryPoint = "seiza_live_stacker_open_fits_with_reference_image",
+        StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint OpenLiveStackerWithReferenceImage(
+        string referenceImagePath,
+        string channelReferencePath,
+        string? biasPath,
+        string? darkPath,
+        string? flatPath,
+        double darkExposureSeconds,
+        string optionsJson,
+        out nint error);
+
+    [LibraryImport(
+        LibraryName,
+        EntryPoint = "seiza_live_stacker_open_fits_with_reference_image_candidates",
+        StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint OpenLiveStackerWithReferenceImageCandidates(
+        string referenceImagePath,
+        string channelReferencePathsJson,
+        string? biasPath,
+        string? darkPath,
+        string? flatPath,
+        double darkExposureSeconds,
+        string optionsJson,
+        out nint selectionJson,
+        out nint error);
+
+    [LibraryImport(
+        LibraryName,
         EntryPoint = "seiza_stack_choose_reference_json",
         StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint ChooseStackReferenceJson(

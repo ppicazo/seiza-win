@@ -13,6 +13,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
 {
     private readonly IReadOnlyList<StackFrameChoice> _frames;
     private readonly Dictionary<string, string> _referencePaths = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string[]> _rankedReferencePaths = new(StringComparer.Ordinal);
     private readonly TaskCompletionSource<ImageStackBatchResult?> _completion = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ImageStackCalibration _calibration = new();
@@ -26,11 +27,23 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     private bool _loaded;
     private bool _running;
     private string? _calibrationLibraryPath;
+    private string? _alignmentReferencePath;
 
     internal ImageStackWindow(IReadOnlyList<string> paths)
     {
         InitializeComponent();
         MinimumWeightBox.Value = new ImageStackOptions().MinimumWeight;
+        SharedAlignmentToggle.IsEnabled = StackingCoreCapabilities.Current.SupportsReferenceImage;
+        SharedAlignmentAvailabilityText.Text = StackingCoreCapabilities.Current.SupportsReferenceImage
+            ? StackingCoreCapabilities.Current.SupportsReferenceImageCandidates
+                ? "A common grid keeps separate filter outputs aligned for color combination."
+                : "This core supports a common grid, but not automatic alignment fallback. Only the chosen channel light is tried."
+            : "Shared alignment needs published Seiza core 0.27.0 or later. Update Seiza; independent grids remain available.";
+        SharedAlignmentHelpText.Text = "Use the first stack's channel reference for the common grid, or choose a FITS/XISF image of the same field. " +
+            "This image is not calibrated or added to the stack unless it is also a selected light. Each filter still uses its own channel reference and calibration masters. " +
+            (StackingCoreCapabilities.Current.SupportsReferenceImageCandidates
+                ? "With automatic selection, up to five native-ranked lights are tried until one aligns."
+                : "This core tries only the chosen channel light, including with automatic selection.");
         _frames = paths
             .Where(ImageFileService.IsStackableImage)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -220,6 +233,10 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     private void UpdateOptionsAndValidation()
     {
         ReferencePanel.Visibility = AutomaticReferenceToggle.IsOn ? Visibility.Collapsed : Visibility.Visible;
+        SharedAlignmentPanel.Visibility = SharedAlignmentToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        FooterHintText.Text = SharedAlignmentToggle.IsOn
+            ? "Only selected light frames contribute to the stack; the alignment image supplies geometry only."
+            : "The reference frame is included in the stack.";
         StackRejectionMode rejection = SelectedTag(RejectionPicker) == "None"
             ? StackRejectionMode.None
             : StackRejectionMode.DeltaSigma;
@@ -266,6 +283,15 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         if (_groups.Any(group => group.Inputs.Count < 2))
         {
             return "Every filter stack needs at least two selected frames.";
+        }
+        if (SharedAlignmentToggle.IsOn && !StackingCoreCapabilities.Current.SupportsReferenceImage)
+        {
+            return "Update Seiza to use published core 0.27.0 or later for shared alignment.";
+        }
+        if (SharedAlignmentToggle.IsOn && _alignmentReferencePath is not null &&
+            !File.Exists(_alignmentReferencePath))
+        {
+            return "The alignment reference image is no longer available. Choose another image.";
         }
         if (SplitsOutput &&
             string.IsNullOrWhiteSpace(ImageStackOutputNaming.SafeBaseName(OutputBaseNameBox.Text)))
@@ -378,6 +404,34 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     private async void ChooseFlat_Click(object sender, RoutedEventArgs e) =>
         await ChooseCalibrationAsync(path => _calibration.FlatPath = path);
 
+    private async void ChooseAlignmentReference_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new FileOpenPicker
+        {
+            SuggestedStartLocation = PickerLocationId.PicturesLibrary,
+            ViewMode = PickerViewMode.List,
+        };
+        foreach (string extension in new[] { ".fits", ".fit", ".fts", ".xisf" })
+        {
+            picker.FileTypeFilter.Add(extension);
+        }
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WindowHandle);
+        StorageFile? file = await picker.PickSingleFileAsync();
+        if (file is not null && !_closed)
+        {
+            _alignmentReferencePath = file.Path;
+            AlignmentReferenceText.Text = file.Path;
+            UpdateOptionsAndValidation();
+        }
+    }
+
+    private void ClearAlignmentReference_Click(object sender, RoutedEventArgs e)
+    {
+        _alignmentReferencePath = null;
+        AlignmentReferenceText.Text = "First stack's channel reference";
+        UpdateOptionsAndValidation();
+    }
+
     private void ClearBias_Click(object sender, RoutedEventArgs e)
     {
         _calibration.BiasPath = null;
@@ -488,6 +542,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
 
         try
         {
+            _rankedReferencePaths.Clear();
             if (AutomaticReferenceToggle.IsOn)
             {
                 foreach (ImageStackGroup group in _groups)
@@ -500,10 +555,15 @@ public sealed partial class ImageStackWindow : Window, IDisposable
                         .Select(probe => probe.Path).ToArray();
                     StackReferenceSelection selected = await StackReferenceService.ChooseAsync(candidates, cancellation.Token);
                     _referencePaths[group.Id] = selected.ReferencePath;
+                    _rankedReferencePaths[group.Id] = selected.GetAlignmentCandidates(candidates).ToArray();
                 }
             }
+            string? alignmentReference = SharedAlignmentToggle.IsOn
+                ? _alignmentReferencePath ?? _referencePaths.GetValueOrDefault(_groups[0].Id)
+                    ?? _groups[0].Inputs[0]
+                : null;
             using BatchCalibrationPreparation prepared = await PrepareCalibrationsAsync(
-                cancellation.Token);
+                alignmentReference, cancellation.Token);
             if (prepared.Warnings.Count > 0 &&
                 !await ConfirmCalibrationWarningsAsync(prepared.Warnings))
             {
@@ -531,7 +591,14 @@ public sealed partial class ImageStackWindow : Window, IDisposable
                         orderedInputs,
                         outputs[group.Id],
                         options,
-                        prepared.ByGroup[group.Id])));
+                        prepared.ByGroup[group.Id])
+                    {
+                        AlignmentReferencePath = alignmentReference,
+                        ChannelReferenceCandidates = alignmentReference is not null && AutomaticReferenceToggle.IsOn &&
+                            StackingCoreCapabilities.Current.SupportsReferenceImageCandidates
+                            ? _rankedReferencePaths.GetValueOrDefault(group.Id) ?? [reference]
+                            : [],
+                    }));
             }
 
             StackProgressBar.IsIndeterminate = false;
@@ -589,6 +656,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     }
 
     private async Task<BatchCalibrationPreparation> PrepareCalibrationsAsync(
+        string? alignmentReferencePath,
         CancellationToken cancellationToken)
     {
         if (SelectedTag(CalibrationSourcePicker) != "Automatic")
@@ -609,6 +677,10 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         var warnings = new List<string>();
         var results = new List<CalibrationPreparationResult>();
         var protectedMasterPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (alignmentReferencePath is not null)
+        {
+            protectedMasterPaths.Add(Path.GetFullPath(alignmentReferencePath));
+        }
         try
         {
             for (int index = 0; index < _groups.Count; index++)

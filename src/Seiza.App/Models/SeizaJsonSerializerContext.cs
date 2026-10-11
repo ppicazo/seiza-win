@@ -11,6 +11,7 @@ namespace Seiza.App.Models;
 [JsonSerializable(typeof(SolveResult))]
 [JsonSerializable(typeof(StackOptionsPayload))]
 [JsonSerializable(typeof(StackReferenceSelection))]
+[JsonSerializable(typeof(StackAlignmentReferenceSelection))]
 [JsonSerializable(typeof(ImageStackDisposition))]
 [JsonSerializable(typeof(ImageStackPipelineResult))]
 [JsonSerializable(typeof(LiveStackNativeState))]

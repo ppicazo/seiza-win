@@ -139,6 +139,56 @@ public sealed class StackReferenceSelectionTests
             StackReferenceService.ChooseAsync(Candidates, cancellation.Token));
     }
 
+    [Fact]
+    public void RankingPreservesNativeOrderAndSkipsUnscoredInputs()
+    {
+        StackReferenceSelection original = ValidSelection();
+        StackReferenceSelection selection = original with
+        {
+            Scores = [null, original.Scores[1], original.Scores[1]],
+            Ranking = [1, 2],
+        };
+
+        selection.Validate(Candidates);
+        Assert.Equal([Candidates[1], Candidates[2]], selection.GetAlignmentCandidates(Candidates));
+        Assert.Equal([Candidates[1]], selection.GetAlignmentCandidates(Candidates, maximum: 1));
+        Assert.Equal([Candidates[1]], original.GetAlignmentCandidates(Candidates));
+    }
+
+    [Theory]
+    [InlineData(new int[0])]
+    [InlineData(new[] { 2, 1 })]
+    [InlineData(new[] { 1, 1 })]
+    [InlineData(new[] { 1, 0 })]
+    [InlineData(new[] { 1, 3 })]
+    [InlineData(new[] { 1, -1 })]
+    [InlineData(new[] { 1 })]
+    public void MalformedRankingsAreRejected(int[] ranking)
+    {
+        StackReferenceSelection original = ValidSelection();
+        StackReferenceSelection selection = original with
+        {
+            Scores = [null, original.Scores[1], original.Scores[1]],
+            Ranking = ranking,
+        };
+
+        Assert.Throws<InvalidDataException>(() => selection.Validate(Candidates));
+    }
+
+    [Fact]
+    public void RankingDefaultBoundsFallbackToFiveWithoutRescoring()
+    {
+        string[] candidates = Enumerable.Range(0, 8).Select(index => $"light-{index}.fits").ToArray();
+        StackReferenceScore score = ValidSelection().Scores[1]!;
+        var selection = new StackReferenceSelection(1, 4, candidates[4], Enumerable.Repeat<StackReferenceScore?>(score, 8).ToArray())
+        {
+            Ranking = [4, 6, 2, 7, 3, 0, 1, 5],
+        };
+        int[] expectedIndices = [4, 6, 2, 7, 3];
+        Assert.Equal(expectedIndices.Select(index => candidates[index]), selection.GetAlignmentCandidates(candidates));
+        Assert.Throws<ArgumentOutOfRangeException>(() => selection.GetAlignmentCandidates(candidates, 0));
+    }
+
     private static StackReferenceSelection ValidSelection() => new(
         1, 1, Candidates[1], [null, new StackReferenceScore(40, 12.5, 1000, 2.5, 8.5), null]);
 }

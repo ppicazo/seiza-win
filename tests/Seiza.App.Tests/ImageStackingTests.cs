@@ -438,6 +438,67 @@ public sealed class ImageStackingTests
         Assert.Contains("not input or calibration files", exception.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(@"C:\reference\common.fits")]
+    [InlineData(@"c:\REFERENCE\COMMON.fits")]
+    [InlineData(@"\\?\C:\reference\common.fits")]
+    public void BatchValidationProtectsAlignmentImagesAcrossGroupsAndPathAliases(string output)
+    {
+        ImageStackJob first = Job("ha", [@"C:\lights\ha-1.fits", @"C:\lights\ha-2.fits"], output);
+        ImageStackJob second = Job("oiii", [@"C:\lights\o3-1.fits", @"C:\lights\o3-2.fits"], @"C:\stacks\oiii.fits");
+        second = second with { Request = second.Request with { AlignmentReferencePath = @"C:\reference\common.fits" } };
+
+        Assert.Throws<ArgumentException>(() => ImageStackValidation.ValidateBatch([first, second]));
+    }
+
+    [Fact]
+    public void AlignmentImageCanAlsoBeASelectedLightWithoutBeingCountedTwice()
+    {
+        ImageStackJob job = Job("ha", [@"C:\lights\ha-1.fits", @"C:\lights\ha-2.fits"], @"C:\stacks\ha.fits");
+        job = job with { Request = job.Request with
+        {
+            AlignmentReferencePath = job.Request.Inputs[0],
+            ChannelReferenceCandidates = [job.Request.Inputs[1], job.Request.Inputs[0]],
+        } };
+
+        ImageStackValidation.ValidateBatch([job]);
+        Assert.Equal(new[] { job.Request.Inputs[1], job.Request.Inputs[0] },
+            job.Request.InputsStartingWith(job.Request.Inputs[1]));
+    }
+
+    [Fact]
+    public void ChannelFallbackCandidatesMustBeDistinctLightsFromTheirOwnStack()
+    {
+        ImageStackJob job = Job("ha", [@"C:\lights\ha-1.fits", @"C:\lights\ha-2.fits"], @"C:\stacks\ha.fits");
+        ImageStackRequest request = job.Request with { AlignmentReferencePath = @"C:\reference\common.fits" };
+        string[][] invalidCandidates =
+        [
+            [request.Inputs[0], request.Inputs[0]],
+            [@"C:\other\o3.fits"],
+            Enumerable.Repeat(request.Inputs[0], 6).ToArray(),
+        ];
+        foreach (string[] candidates in invalidCandidates)
+        {
+            Assert.Throws<ArgumentException>(() => ImageStackValidation.ValidateBatch(
+                [job with { Request = request with { ChannelReferenceCandidates = candidates } }]));
+        }
+        Assert.Throws<ArgumentException>(() => ImageStackValidation.ValidateBatch(
+            [job with { Request = job.Request with { ChannelReferenceCandidates = [request.Inputs[0]] } }]));
+    }
+
+    [Fact]
+    public void AlignmentReferenceMustNotBeACalibrationMaster()
+    {
+        ImageStackJob job = Job("ha", [@"C:\lights\ha-1.fits", @"C:\lights\ha-2.fits"], @"C:\stacks\ha.fits");
+        job = job with { Request = job.Request with
+        {
+            AlignmentReferencePath = @"C:\masters\bias.fits",
+            Calibration = new ImageStackCalibration { BiasPath = @"C:\masters\bias.fits" },
+        } };
+
+        Assert.Throws<ArgumentException>(() => ImageStackValidation.ValidateBatch([job]));
+    }
+
     [Fact]
     public void AtomicOutputFailurePreservesExistingDestination()
     {

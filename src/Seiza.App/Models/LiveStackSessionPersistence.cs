@@ -1,83 +1,5 @@
 namespace Seiza.App.Models;
 
-internal static class LiveStackPath
-{
-    private const string ExtendedPathPrefix = @"\\?\";
-    private const string ExtendedUncPrefix = @"\\?\UNC\";
-
-    public static string NormalizeForComparison(string path)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        string ordinaryPath = RemoveExtendedPrefix(path);
-        return Path.GetFullPath(ordinaryPath);
-    }
-
-    public static bool Equals(string? left, string? right)
-    {
-        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
-        {
-            return false;
-        }
-        try
-        {
-            return string.Equals(
-                NormalizeForComparison(left),
-                NormalizeForComparison(right),
-                StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return string.Equals(
-                RemoveExtendedPrefix(left),
-                RemoveExtendedPrefix(right),
-                StringComparison.OrdinalIgnoreCase);
-        }
-    }
-
-    public static bool IsWithinDirectory(string path, string directory)
-    {
-        try
-        {
-            string fullPath = NormalizeForComparison(path);
-            string normalizedDirectory = NormalizeForComparison(directory);
-            string fullDirectory = Path.TrimEndingDirectorySeparator(normalizedDirectory);
-            string directoryPrefix = Path.EndsInDirectorySeparator(normalizedDirectory)
-                ? normalizedDirectory
-                : normalizedDirectory + Path.DirectorySeparatorChar;
-            return string.Equals(
-                    fullPath,
-                    fullDirectory,
-                    StringComparison.OrdinalIgnoreCase) ||
-                fullPath.StartsWith(
-                    directoryPrefix,
-                    StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return false;
-        }
-    }
-
-    private static string RemoveExtendedPrefix(string path)
-    {
-        if (path.StartsWith(ExtendedUncPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return @"\\" + path[ExtendedUncPrefix.Length..];
-        }
-        if (path.StartsWith(ExtendedPathPrefix, StringComparison.OrdinalIgnoreCase) &&
-            path.Length >= ExtendedPathPrefix.Length + 3 &&
-            char.IsAsciiLetter(path[ExtendedPathPrefix.Length]) &&
-            path[ExtendedPathPrefix.Length + 1] == ':' &&
-            path[ExtendedPathPrefix.Length + 2] is '\\' or '/')
-        {
-            return path[ExtendedPathPrefix.Length..];
-        }
-        return path;
-    }
-}
-
 internal enum LiveStackPersistedFrameDisposition
 {
     Accepted,
@@ -175,6 +97,10 @@ internal sealed record LiveStackNativeState
     /// Null only for contexts written before this additive live-state field.
     /// </summary>
     public CalibrationFrameProbe? ReferenceFrame { get; init; }
+    /// <summary>Null in older cores, where the reference was always integrated.</summary>
+    public bool? ReferenceIntegrated { get; init; }
+    /// <summary>Separate geometry-only image, retained even when it is not a light.</summary>
+    public string? ReferenceImagePath { get; init; }
     /// <summary>
     /// Why the native core cannot integrate this stack again to remove
     /// transients, or null when it can. Advisory only: it takes no part in
@@ -201,6 +127,10 @@ internal sealed record LiveStackNativeState
             // when the manifest did capture it, it remains authoritative.
             (ReferenceFrame is not null &&
              !Equals(ReferenceFrame, other.ReferenceFrame)) ||
+            (ReferenceIntegrated is not null &&
+             ReferenceIntegrated != other.ReferenceIntegrated) ||
+            (ReferenceImagePath is not null &&
+             !LiveStackPath.Equals(ReferenceImagePath, other.ReferenceImagePath)) ||
             InputPaths is null ||
             other.InputPaths is null ||
             InputPaths.Length != other.InputPaths.Length)
