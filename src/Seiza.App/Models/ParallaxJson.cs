@@ -32,6 +32,30 @@ internal static class ParallaxJson
         return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, checked((int)buffer.Length));
     }
 
+    // {"path": ...} for a dust map file, or {} for the dust counted from the stars.
+    internal static string SerializeDustMapPath(string? path) => WriteObject(writer =>
+    {
+        if (path is not null) writer.WriteString("path", path);
+    });
+
+    internal static string SerializeDustMapWrite(string path, bool counted) => WriteObject(writer =>
+    {
+        writer.WriteString("path", path);
+        writer.WriteBoolean("counted", counted);
+    });
+
+    private static string WriteObject(Action<Utf8JsonWriter> write)
+    {
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            write(writer);
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, checked((int)buffer.Length));
+    }
+
     internal static string SerializeVideo(ParallaxVideoSettings video) => JsonSerializer.Serialize(video, ParallaxJsonContext.Default.ParallaxVideoSettings);
     internal static string SerializePlan(ParallaxTourPlan plan) => JsonSerializer.Serialize(plan, ParallaxJsonContext.Default.ParallaxTourPlan);
     internal static string SerializeComposition(ParallaxComposition composition) => JsonSerializer.Serialize(composition, DraftContext.ParallaxComposition);

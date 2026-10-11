@@ -422,6 +422,13 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         Toggle(stars, "Dust dimming", () => Composition.Scene.Dust, value => Session.Edit(c => c.Scene.Dust = value));
         Number(stars, "Dust strength", () => Composition.Scene.DustOpacity, value => Session.Edit(c => c.Scene.DustOpacity = value),
             0, step: 0.1, enabled: () => Composition.Scene.Dust);
+        // A map painted white where the dust is opaque replaces the counted dust;
+        // stars seen through its opaque places fly in front of the nebula.
+        InputPicker(stars, ParallaxInputFile.DustMap, "dust map (white where opaque)");
+        var dust = ButtonRow(stars);
+        AsyncButton(dust, "Reload", Session.ReloadDustMapAsync, () => Session.CanReloadDustMap);
+        AsyncButton(dust, "Export Dust Map…", ExportDustMapAsync, () => Session.CanExportDustMap);
+        Note(stars, value: () => Session.DustDescription);
 
         StackPanel catalogues = Section("Catalogues and solving");
         Note(catalogues, value: () => string.IsNullOrWhiteSpace(Session.CatalogDirectoryPath)
@@ -825,7 +832,8 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         return _closed ? null : file?.Path;
     }
 
-    private async Task<string?> PickSaveAsync(string name, string description, string extension)
+    private async Task<string?> PickSaveAsync(string name, string description, string extension,
+        params (string Description, string Extension)[] more)
     {
         // The desktop SDK picker returns a path only. The legacy StorageFile
         // picker may create a file before rendering, undermining atomic export.
@@ -837,6 +845,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             ShowOverwritePrompt = true,
         };
         picker.FileTypeChoices.Add(description, [extension]);
+        foreach (var choice in more) picker.FileTypeChoices.Add(choice.Description, [choice.Extension]);
         var file = await picker.PickSaveFileAsync();
         return _closed ? null : file?.Path;
     }
@@ -848,8 +857,21 @@ public sealed partial class ParallaxWindow : Window, IDisposable
 
     private async Task ChooseInputAsync(ParallaxInputFile kind)
     {
-        if (await PickFileAsync(kind == ParallaxInputFile.Separator ? ".exe" : ".bin") is { } path)
+        string[] extensions = kind switch
+        {
+            ParallaxInputFile.Separator => [".exe"],
+            ParallaxInputFile.DustMap => [".png", ".tif", ".tiff", ".jpg", ".jpeg", ".fits", ".fit", ".fts", ".xisf"],
+            _ => [".bin"],
+        };
+        if (await PickFileAsync(extensions) is { } path)
             await Session.ChooseInputAsync(kind, path);
+    }
+
+    private async Task ExportDustMapAsync()
+    {
+        string name = Path.GetFileNameWithoutExtension(Session.SourceName) + "-dust";
+        if (await PickSaveAsync(name, "16-bit PNG", ".png", ("16-bit TIFF", ".tif"), ("32-bit FITS", ".fits"), ("32-bit XISF", ".xisf")) is { } path)
+            await Session.ExportDustMapAsync(path);
     }
 
     private async Task ChooseObjectFolderAsync()

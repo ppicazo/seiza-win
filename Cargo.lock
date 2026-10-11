@@ -1591,9 +1591,9 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seiza"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a00c3fbbdc2782d520d0c36d6b2284e0ab77c11fe2098104de1fb8cd93152bea"
+checksum = "92fcf10e5fb7d7c44f34039cae5d4a0c6a8a14ebfa72587a109f6c89d331991f"
 dependencies = [
  "chrono",
  "directories",
@@ -1628,9 +1628,9 @@ dependencies = [
 
 [[package]]
 name = "seiza-cabi"
-version = "0.25.1"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b70f7e2e23872ea6d42986af7ddb5bb48ebafdbdb12a327f9cf2df90437b3b93"
+checksum = "0e84c525f41fa18781e2e163dfa1e890dc3f9d5a8bcd0c407d86eda8876692aa"
 dependencies = [
  "cbindgen",
  "image",
@@ -1639,6 +1639,7 @@ dependencies = [
  "seiza-calibration",
  "seiza-deconvolution",
  "seiza-fits 0.3.0",
+ "seiza-image-io",
  "seiza-parallax",
  "seiza-sources",
  "seiza-stacking",
@@ -1735,6 +1736,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "seiza-image-io"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8da7a60d8e40ea8e29e9fc95212410c733efbb6b3a25ad1c9965051f7e025e73"
+dependencies = [
+ "image",
+ "seiza",
+ "seiza-fits 0.3.0",
+ "seiza-xisf 0.4.0",
+ "thiserror",
+]
+
+[[package]]
 name = "seiza-imgproc"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1745,9 +1759,9 @@ dependencies = [
 
 [[package]]
 name = "seiza-parallax"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdff63ad33db1f355dfa616d4b682f328a73a1c0005beb2e6b9cbaaeb1610d38"
+checksum = "5785230451597771fd2a8202283f8886d1f6737a6884460209c269ebe0566762"
 dependencies = [
  "ab_glyph",
  "image",
@@ -1755,6 +1769,7 @@ dependencies = [
  "rayon",
  "seiza",
  "seiza-draw",
+ "seiza-image-io",
  "seiza-sources",
  "seiza-stars",
  "thiserror",
@@ -1788,9 +1803,9 @@ dependencies = [
 
 [[package]]
 name = "seiza-stacking"
-version = "0.27.0"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec1542e36963f7cba7b5a90b153d80b288bdb818674f3a2c7b9c41417f7dee90"
+checksum = "44ae074e2686e1a1936e2b57dc32232533f7c02dc0ae70beb212503bb56f2412"
 dependencies = [
  "multiversion 0.9.0",
  "postcard",
@@ -1798,6 +1813,7 @@ dependencies = [
  "seiza",
  "seiza-calibration",
  "seiza-fits 0.3.0",
+ "seiza-image-io",
  "seiza-imgproc",
  "seiza-stats",
  "seiza-stretch",

@@ -280,6 +280,9 @@ public sealed record ParallaxInputs
     public string? StarDistances { get; set; }
     public string? RcAstroExecutable { get; set; }
     public string? RcAstroHost { get; set; }
+    // A dust map, white where opaque, in place of the dust counted from the
+    // stars. A scene field: reconfiguration refuses it.
+    public string? DustMap { get; set; }
 }
 
 public sealed record ParallaxRequest
@@ -340,6 +343,10 @@ public sealed record ParallaxSummary
     public double[] BackgroundFocus { get; init; } = [];
     public ParallaxFit Fit { get; init; } = new();
     public WcsResult Wcs { get; init; } = new();
+    // Whether a given map, rather than the star counts, made the dust, and
+    // how many stars its opaque places brought in front of the nebula.
+    public bool DustGiven { get; init; }
+    public int StarsInFrontOfDust { get; init; }
 }
 public sealed record ParallaxEvent
 {
