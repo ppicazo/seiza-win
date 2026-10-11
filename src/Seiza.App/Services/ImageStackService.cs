@@ -10,6 +10,13 @@ internal static class ImageStackService
         CancellationToken cancellationToken = default)
     {
         ImageStackValidation.ValidateBatch(jobs);
+        foreach (ImageStackJob job in jobs.Where(job => job.Request.AlignmentReferencePath is not null))
+        {
+            // Fail before any earlier group can write an output when a
+            // published core has not yet caught up with the requested APIs.
+            StackingCoreCapabilities.Current.RequireReferenceImage(
+                needsFallback: job.Request.ChannelReferenceCandidates.Count > 1);
+        }
 
         int totalFrames = jobs.Sum(job => job.Request.Inputs.Count);
         int completedBeforeJob = 0;
@@ -72,11 +79,30 @@ internal static class ImageStackService
             0,
             0));
 
-        await using ImageStackSession session = await ImageStackSession.OpenAsync(
-            request.Inputs[0],
-            request.Options,
-            request.Calibration,
-            cancellationToken).ConfigureAwait(false);
+        ImageStackSession opened;
+        StackAlignmentReferenceSelection? referenceSelection = null;
+        if (request.AlignmentReferencePath is string alignmentPath)
+        {
+            ImageStackReferenceOpenResult result = await ImageStackSession.OpenWithReferenceImageAsync(
+                alignmentPath,
+                request.ChannelReferenceCandidates.Count > 0
+                    ? request.ChannelReferenceCandidates : [request.Inputs[0]],
+                request.Options,
+                request.Calibration,
+                cancellationToken).ConfigureAwait(false);
+            opened = result.Session;
+            referenceSelection = result.Selection;
+        }
+        else
+        {
+            opened = await ImageStackSession.OpenAsync(
+                request.Inputs[0], request.Options, request.Calibration,
+                cancellationToken).ConfigureAwait(false);
+        }
+        await using ImageStackSession session = opened;
+        string[] orderedInputs = request.InputsStartingWith(
+            referenceSelection?.ChannelReferencePath ?? request.Inputs[0]);
+        bool referenceIntegrated = request.AlignmentReferencePath is null;
 
         var dispositions = new List<ImageStackDisposition>(request.Inputs.Count - 1);
         var snrSamples = new List<ImageStackSnrSample>();
@@ -97,22 +123,31 @@ internal static class ImageStackService
             cancellationToken).ConfigureAwait(false);
         progress?.Invoke(new ImageStackProgress(
             ImageStackProgressPhase.Stacking,
-            Path.GetFileName(request.Inputs[0]),
-            1,
+            referenceSelection is null
+                ? Path.GetFileName(orderedInputs[0])
+                : $"Channel reference: {Path.GetFileName(orderedInputs[0])}" +
+                    (referenceSelection.Skipped.Length > 0
+                        ? $" ({referenceSelection.Skipped.Length} earlier alignment candidates skipped)" : string.Empty),
+            referenceIntegrated ? 1 : 0,
             request.Inputs.Count,
             counts.AcceptedFrames,
             counts.RejectedFrames));
 
-        for (int index = 1; index < request.Inputs.Count; index++)
+        for (int index = referenceIntegrated ? 1 : 0; index < orderedInputs.Length; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            string path = request.Inputs[index];
+            string path = orderedInputs[index];
             ImageStackPushResult push = await session.PushFrameAsync(path, cancellationToken)
                 .ConfigureAwait(false);
             dispositions.Add(push.Disposition);
             if (push.NativeFailure)
             {
                 failedFrames++;
+            }
+            if (!referenceIntegrated && index == 0 && !push.Disposition.Accepted)
+            {
+                throw new SeizaCoreException(
+                    $"The channel reference could not be integrated: {push.Disposition.Reason}");
             }
 
             counts = await session.GetCountsAsync(cancellationToken).ConfigureAwait(false);
@@ -200,7 +235,8 @@ internal static class ImageStackService
                         sample.Background,
                         sample.Signal))),
                     snrWarning,
-                    transientNote);
+                    transientNote,
+                    referenceSelection);
             }
         }
         finally

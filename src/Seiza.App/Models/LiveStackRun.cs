@@ -173,6 +173,8 @@ internal sealed record LiveStackRunConfiguration
     public bool ChooseReferenceAutomatically { get; init; }
     public bool ApplyCalibrationOnResume { get; init; }
     public string? InitialReferencePath { get; init; }
+    /// <summary>Optional geometry-only image; it is never automatically integrated or calibrated.</summary>
+    public string? AlignmentReferencePath { get; init; }
     public string? OutputPath { get; init; }
     public ImageStackOptions Options { get; init; } = new();
     public ImageStackCalibration Calibration { get; init; } = new();
@@ -191,6 +193,7 @@ internal sealed record LiveStackRunConfiguration
     public string[] MonitorExcludedPaths() => new[]
     {
         OutputPath,
+        AlignmentReferencePath,
         Calibration.BiasPath,
         Calibration.DarkPath,
         Calibration.FlatPath,
@@ -225,6 +228,19 @@ internal sealed record LiveStackRunConfiguration
         if (Calibration.ValidationMessage([]) is string calibrationError)
         {
             throw new ArgumentException(calibrationError, nameof(Calibration));
+        }
+        if (AlignmentReferencePath is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(AlignmentReferencePath);
+            if (new[] { Calibration.BiasPath, Calibration.DarkPath, Calibration.FlatPath }
+                .Any(path => LiveStackPath.Equals(path, AlignmentReferencePath)))
+            {
+                throw new ArgumentException("The alignment reference cannot also be a calibration master.");
+            }
+            if (LiveStackPath.Equals(OutputPath, AlignmentReferencePath))
+            {
+                throw new ArgumentException("The output cannot overwrite the alignment reference.");
+            }
         }
         if (string.IsNullOrWhiteSpace(PreviewProcessingJson))
         {

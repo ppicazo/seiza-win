@@ -21,10 +21,18 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
     private bool _disposed;
     private bool _finished;
 
-    private ImageStackSession(SafeLiveStackerHandle handle)
+    private ImageStackSession(
+        SafeLiveStackerHandle handle,
+        string? selectedReferencePath = null,
+        StackAlignmentReferenceSelection? referenceSelection = null)
     {
         _handle = handle;
+        SelectedReferencePath = selectedReferencePath;
+        ReferenceSelection = referenceSelection;
     }
+
+    public string? SelectedReferencePath { get; }
+    public StackAlignmentReferenceSelection? ReferenceSelection { get; }
 
     public static Task<ImageStackSession> OpenAsync(
         string referencePath,
@@ -58,7 +66,97 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
                     "The Seiza core could not open the reference image.");
             }
             FreeUnexpectedError(error);
-            return new ImageStackSession(new SafeLiveStackerHandle(rawHandle));
+            return new ImageStackSession(new SafeLiveStackerHandle(rawHandle), fullReferencePath);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Opens an empty stack on a shared geometry-only image. The selected
+    /// channel light must be pushed first, followed by every other light.
+    /// </summary>
+    public static Task<ImageStackReferenceOpenResult> OpenWithReferenceImageAsync(
+        string referenceImagePath,
+        IReadOnlyList<string> channelReferencePaths,
+        ImageStackOptions options,
+        ImageStackCalibration calibration,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(referenceImagePath);
+        ArgumentNullException.ThrowIfNull(channelReferencePaths);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(calibration);
+        if (channelReferencePaths.Count == 0)
+        {
+            throw new ArgumentException("Choose at least one channel reference light.", nameof(channelReferencePaths));
+        }
+        string fullReferenceImagePath = Path.GetFullPath(referenceImagePath);
+        string[] fullChannelPaths = channelReferencePaths.Select(path =>
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(path);
+            return Path.GetFullPath(path);
+        }).ToArray();
+        if (fullChannelPaths.Distinct(StringComparer.OrdinalIgnoreCase).Count() != fullChannelPaths.Length)
+        {
+            throw new ArgumentException("Channel reference candidates must be distinct.", nameof(channelReferencePaths));
+        }
+        string configurationJson = options.ToJson();
+        NativeCalibration nativeCalibration = NativeCalibration.From(calibration);
+        string channelPathsJson = JsonSerializer.Serialize(fullChannelPaths, SeizaJsonSerializerContext.Default.StringArray);
+
+        return Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            StackingCoreCapabilities capabilities = StackingCoreCapabilities.Current;
+            capabilities.RequireReferenceImage(needsFallback: fullChannelPaths.Length > 1);
+            nint selectionJson = 0;
+            nint error = 0;
+            nint rawHandle = capabilities.SupportsReferenceImageCandidates
+                ? NativeMethods.OpenLiveStackerWithReferenceImageCandidates(
+                    fullReferenceImagePath, channelPathsJson,
+                    nativeCalibration.BiasPath, nativeCalibration.DarkPath, nativeCalibration.FlatPath,
+                    nativeCalibration.DarkExposureSeconds, configurationJson, out selectionJson, out error)
+                : NativeMethods.OpenLiveStackerWithReferenceImage(
+                    fullReferenceImagePath, fullChannelPaths[0],
+                    nativeCalibration.BiasPath, nativeCalibration.DarkPath, nativeCalibration.FlatPath,
+                    nativeCalibration.DarkExposureSeconds, configurationJson, out error);
+            // Establish ownership before inspecting any returned strings or
+            // cancellation. No synchronous native work is detached on cancel.
+            var handle = new SafeLiveStackerHandle(rawHandle);
+            try
+            {
+                string? selectionText = selectionJson == 0
+                    ? null
+                    : NativeString.TakeOwned(selectionJson, string.Empty);
+                Exception? failure = error == 0
+                    ? null
+                    : NativeString.TakeError(error, "The Seiza core could not align a channel reference.");
+                cancellationToken.ThrowIfCancellationRequested();
+                if (handle.IsInvalid)
+                {
+                    throw failure ?? new SeizaCoreException("The Seiza core could not align a channel reference.");
+                }
+                StackAlignmentReferenceSelection selection = capabilities.SupportsReferenceImageCandidates
+                    ? JsonSerializer.Deserialize(
+                        selectionText ?? throw new SeizaCoreException("Seiza returned no alignment reference selection."),
+                        SeizaJsonSerializerContext.Default.StackAlignmentReferenceSelection)
+                        ?? throw new SeizaCoreException("Seiza returned no alignment reference selection.")
+                    : new(1, 0, fullChannelPaths[0], []);
+                selection.Validate(fullChannelPaths);
+                LiveStackNativeState state = ReadState(handle);
+                if (state.ReferenceIntegrated != false || state.AcceptedFrames != 0 || state.RejectedFrames != 0 ||
+                    !StackSourceIdentity.RefersToSameFile(state.ReferenceImagePath, fullReferenceImagePath))
+                {
+                    throw new SeizaCoreException("Seiza returned an inconsistent shared-reference stack.");
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                var session = new ImageStackSession(handle, selection.ChannelReferencePath, selection);
+                return new ImageStackReferenceOpenResult(session, selection);
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
         }, cancellationToken);
     }
 
@@ -312,6 +410,7 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             return await Task.Run(() =>
             {
+                string[] protectedPaths = GetProtectedPaths(liveHandle);
                 nint error = 0;
                 nint rawSnapshot;
                 try
@@ -332,7 +431,7 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
                         "The Seiza core could not finish the image stack.");
                 }
                 FreeUnexpectedError(error);
-                return CreateOwnedSnapshot(rawSnapshot);
+                return CreateOwnedSnapshot(rawSnapshot, protectedPaths);
             }, CancellationToken.None).ConfigureAwait(false);
         }
         finally
@@ -522,12 +621,24 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
             SeizaJsonSerializerContext.Default.LiveStackNativeState)
             ?? throw new SeizaCoreException(
                 "The Seiza core returned invalid live-stack state.");
+        ValidateNativeState(state);
+        return state;
+    }
+
+    internal static void ValidateNativeState(LiveStackNativeState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        bool externalReference = state.ReferenceIntegrated == false;
         if (state.SchemaVersion != LiveStackNativeState.CurrentSchemaVersion ||
             string.IsNullOrWhiteSpace(state.CoreVersion) ||
             state.Width <= 0 ||
             state.Height <= 0 ||
             state.Channels is not (1 or 3) ||
-            state.AcceptedFrames <= 0 ||
+            state.AcceptedFrames < 0 || state.RejectedFrames < 0 ||
+            (state.AcceptedFrames == 0 && !externalReference) ||
+            (externalReference && string.IsNullOrWhiteSpace(state.ReferenceImagePath)) ||
+            (!externalReference && state.ReferenceImagePath is not null) ||
+            string.IsNullOrWhiteSpace(state.ConfigurationFingerprint) ||
             state.ConfigurationFingerprint.Length != 64 ||
             state.ConfigurationFingerprint.Any(character =>
                 character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f')) ||
@@ -538,7 +649,6 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
             throw new SeizaCoreException(
                 "The Seiza core returned invalid live-stack state.");
         }
-        return state;
     }
 
     private static unsafe ImageStackSnrSample? MeasureDepth(SafeLiveStackerHandle handle)
@@ -650,6 +760,7 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
 
     private static ImageStackSnapshot CreateSnapshot(SafeLiveStackerHandle handle)
     {
+        string[] protectedPaths = GetProtectedPaths(handle);
         nint error = 0;
         nint rawSnapshot = NativeMethods.SnapshotLiveStacker(
             handle.DangerousGetHandle(),
@@ -662,7 +773,7 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
         }
 
         FreeUnexpectedError(error);
-        return CreateOwnedSnapshot(rawSnapshot);
+        return CreateOwnedSnapshot(rawSnapshot, protectedPaths);
     }
 
     private static unsafe ImageStackSnapshot Reintegrate(
@@ -673,6 +784,7 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
         IProgress<ImageStackReintegrationProgress>? progress,
         CancellationToken cancellationToken)
     {
+        string[] protectedPaths = GetProtectedPaths(handle);
         GCHandle callbackState = progress is null ? default : GCHandle.Alloc(progress);
         nint error = 0;
         nint rawSnapshot;
@@ -707,7 +819,7 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
                 "The Seiza core could not remove transients from the stack.");
         }
         FreeUnexpectedError(error);
-        return CreateOwnedSnapshot(rawSnapshot);
+        return CreateOwnedSnapshot(rawSnapshot, protectedPaths);
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
@@ -741,6 +853,7 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
     private static ImageStackExportSnapshot CreateExportSnapshot(
         SafeLiveStackerHandle handle)
     {
+        string[] protectedPaths = GetProtectedPaths(handle);
         nint stacker = handle.DangerousGetHandle();
         int acceptedFrames = checked((int)NativeMethods.GetLiveStackerAcceptedFrames(stacker));
         int rejectedFrames = checked((int)NativeMethods.GetLiveStackerRejectedFrames(stacker));
@@ -760,7 +873,8 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
             return new ImageStackExportSnapshot(
                 exportHandle,
                 acceptedFrames,
-                rejectedFrames);
+                rejectedFrames,
+                protectedPaths);
         }
         catch
         {
@@ -769,12 +883,20 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
         }
     }
 
-    private static ImageStackSnapshot CreateOwnedSnapshot(nint rawSnapshot)
+    private static string[] GetProtectedPaths(SafeLiveStackerHandle handle)
+    {
+        LiveStackNativeState state = ReadState(handle);
+        return state.ReferenceImagePath is string shared
+            ? [.. state.InputPaths, shared]
+            : [.. state.InputPaths];
+    }
+
+    private static ImageStackSnapshot CreateOwnedSnapshot(nint rawSnapshot, string[] protectedPaths)
     {
         var handle = new SafeStackSnapshotHandle(rawSnapshot);
         try
         {
-            return new ImageStackSnapshot(handle);
+            return new ImageStackSnapshot(handle, protectedPaths);
         }
         catch
         {
@@ -825,5 +947,45 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
 
         private static string? FullPathOrNull(string? path) =>
             string.IsNullOrWhiteSpace(path) ? null : Path.GetFullPath(path);
+    }
+}
+
+internal sealed record ImageStackReferenceOpenResult(
+    ImageStackSession Session,
+    StackAlignmentReferenceSelection Selection);
+
+internal static class StackOutputProtection
+{
+    public static void ValidateDestination(string outputPath, IReadOnlyList<string> protectedPaths)
+    {
+        // New destinations need only lexical checks. Avoid opening every source
+        // in a large stack when no existing file can alias the destination.
+        bool destinationExists = File.Exists(outputPath);
+        foreach (string input in protectedPaths)
+        {
+            if (LiveStackPath.Equals(input, outputPath) ||
+                (destinationExists && StackSourceIdentity.RefersToSameFile(outputPath, input)))
+            {
+                throw new SeizaCoreException(
+                    "The stack output must not replace a light, calibration master, or shared alignment reference image.");
+            }
+        }
+    }
+}
+
+internal static class StackSourceIdentity
+{
+    public static bool RefersToSameFile(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+        {
+            return false;
+        }
+        if (LiveStackPath.Equals(left, right))
+        {
+            return true;
+        }
+        return WindowsFileIdentity.TryGet(left) is string leftIdentity &&
+            string.Equals(leftIdentity, WindowsFileIdentity.TryGet(right), StringComparison.Ordinal);
     }
 }

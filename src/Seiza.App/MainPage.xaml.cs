@@ -159,7 +159,8 @@ public sealed partial class MainPage : Page, IDisposable
                 result.Results.Any(item =>
                     item.SnrAnalysis.Points.Count > 1 ||
                     item.SnrWarning is not null ||
-                    item.TransientRemovalNote is not null))
+                    item.TransientRemovalNote is not null ||
+                    item.ReferenceSelection?.Skipped.Length > 0))
             {
                 string outputs = string.Join(
                     Environment.NewLine,
@@ -215,6 +216,18 @@ public sealed partial class MainPage : Page, IDisposable
                     content.Children.Add(new TextBlock
                     {
                         Text = string.Join(Environment.NewLine, transientNotes),
+                        TextWrapping = TextWrapping.Wrap,
+                    });
+                }
+                foreach (ImageStackResult item in result.Results.Where(item => item.ReferenceSelection?.Skipped.Length > 0))
+                {
+                    StackAlignmentReferenceSelection selection = item.ReferenceSelection!;
+                    content.Children.Add(new TextBlock
+                    {
+                        Text = $"{Path.GetFileName(item.OutputPath)}: using channel reference " +
+                            $"{Path.GetFileName(selection.ChannelReferencePath)}." + Environment.NewLine +
+                            string.Join(Environment.NewLine, selection.Skipped.Select(skipped =>
+                                $"Could not align {Path.GetFileName(skipped.Path)} as reference: {skipped.Reason}")),
                         TextWrapping = TextWrapping.Wrap,
                     });
                 }

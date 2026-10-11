@@ -12,13 +12,16 @@ internal sealed class ImageStackExportSnapshot : IDisposable, IAsyncDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SafeStackExportSnapshotHandle? _handle;
     private bool _disposed;
+    private readonly string[] _protectedPaths;
 
     internal ImageStackExportSnapshot(
         SafeStackExportSnapshotHandle handle,
         int acceptedFrames,
-        int rejectedFrames)
+        int rejectedFrames,
+        string[] protectedPaths)
     {
         _handle = handle;
+        _protectedPaths = (string[])protectedPaths.Clone();
         AcceptedFrames = acceptedFrames;
         RejectedFrames = rejectedFrames;
     }
@@ -39,6 +42,8 @@ internal sealed class ImageStackExportSnapshot : IDisposable, IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             await Task.Run(() =>
             {
+                // Native source protection cannot see beyond our staging file.
+                StackOutputProtection.ValidateDestination(outputPath, _protectedPaths);
                 AtomicOutputFile.Write(
                     outputPath,
                     stagingPath =>

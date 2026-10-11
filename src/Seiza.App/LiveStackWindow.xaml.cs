@@ -131,6 +131,38 @@ public sealed partial class LiveStackWindow : Window, IDisposable
     private async void ChooseFlat_Click(object sender, RoutedEventArgs e) =>
         await ChooseCalibrationMasterAsync(path => _manualCalibration.FlatPath = path);
 
+    private async void ChooseAlignmentReference_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new FileOpenPicker
+        {
+            SuggestedStartLocation = PickerLocationId.PicturesLibrary,
+            ViewMode = PickerViewMode.List,
+        };
+        foreach (string extension in new[] { ".fits", ".fit", ".fts", ".xisf" })
+        {
+            picker.FileTypeFilter.Add(extension);
+        }
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WindowHandle);
+        StorageFile? file = await picker.PickSingleFileAsync();
+        if (file is not null && !_closed && !_closeInProgress)
+        {
+            AlignmentReferenceTextBox.Text = file.Path;
+            _initialReferencePath = null;
+            ReplacePreparedCalibration(null);
+            ClearConfigurationNotice();
+            UpdateConfigurationState();
+        }
+    }
+
+    private void ClearAlignmentReference_Click(object sender, RoutedEventArgs e)
+    {
+        AlignmentReferenceTextBox.Text = string.Empty;
+        _initialReferencePath = null;
+        ReplacePreparedCalibration(null);
+        ClearConfigurationNotice();
+        UpdateConfigurationState();
+    }
+
     private void ClearBias_Click(object sender, RoutedEventArgs e)
     {
         _manualCalibration.BiasPath = null;
@@ -251,6 +283,12 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         RejectionOptionsPanel.Visibility = SelectedTag(RejectionPicker) == "DeltaSigma"
             ? Visibility.Visible
             : Visibility.Collapsed;
+        bool supportsSharedReference = StackingCoreCapabilities.Current.SupportsReferenceImage;
+        ChooseAlignmentReferenceButton.IsEnabled = supportsSharedReference;
+        ClearAlignmentReferenceButton.IsEnabled = AlignmentReferencePath is not null;
+        AlignmentReferenceHelpText.Text = supportsSharedReference
+            ? "Use the same FITS/XISF image in separate filter runs to share one output grid and WCS. It supplies geometry only: calibration, brightness and exposure come from this filter's lights. Match mono/RGB channel count and image scale. Automatic selection tries up to five ranked lights. Resume retains the saved alignment reference; selecting a different image starts a new accumulator."
+            : "Shared alignment references need a newer Seiza core. This installed core does not export the required API; ordinary live stacking is unchanged.";
 
         ImageStackOptions options = CreateOptions();
         ImageStackCalibration calibration = CreateSelectedCalibration();
@@ -361,8 +399,31 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         {
             return "Choose a calibration library folder.";
         }
+        if (AlignmentReferencePath is string alignmentPath)
+        {
+            if (!StackingCoreCapabilities.Current.SupportsReferenceImage)
+            {
+                return "This Seiza core does not support shared alignment references.";
+            }
+            if (!File.Exists(alignmentPath))
+            {
+                return "Choose an existing shared alignment reference image.";
+            }
+            if (AutomaticReferenceToggle.IsOn && !StackingCoreCapabilities.Current.SupportsReferenceImageCandidates)
+            {
+                return "Automatic shared-reference fallback needs a newer Seiza core. Choose a manual channel reference or update the core.";
+            }
+            if (new[] { calibration.BiasPath, calibration.DarkPath, calibration.FlatPath }
+                .Any(path => LiveStackPath.Equals(path, alignmentPath)))
+            {
+                return "The shared alignment reference cannot also be a calibration master.";
+            }
+        }
         return options.ValidationMessage ?? calibration.ValidationMessage([]);
     }
+
+    private string? AlignmentReferencePath => string.IsNullOrWhiteSpace(AlignmentReferenceTextBox.Text)
+        ? null : AlignmentReferenceTextBox.Text;
 
     private async void Primary_Click(object sender, RoutedEventArgs e)
     {
@@ -437,6 +498,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
                 ChooseReferenceAutomatically = AutomaticReferenceToggle.IsOn,
                 ApplyCalibrationOnResume = calibrationMode != "None",
                 InitialReferencePath = _initialReferencePath,
+                AlignmentReferencePath = AlignmentReferencePath,
                 Options = options,
                 Calibration = calibration,
             };
@@ -493,6 +555,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
     private async Task<(CalibrationPreparationResult Result, string ReferencePath)>
         PrepareAutomaticCalibrationAsync(CancellationToken cancellationToken)
     {
+        string? alignmentReferencePath = AlignmentReferencePath;
         CalibrationProgressBar.Visibility = Visibility.Visible;
         CalibrationProgressBar.IsIndeterminate = true;
         CalibrationSummaryText.Text = "Finding a reference light…";
@@ -522,6 +585,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
                 Reference = reference,
                 SourcePaths = [Path.GetFullPath(CalibrationFolderTextBox.Text)],
                 CacheDirectory = cacheDirectory,
+                ProtectedMasterPaths = alignmentReferencePath is null ? [] : [alignmentReferencePath],
             },
             progress,
             cancellationToken);
@@ -569,6 +633,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         CancellationToken cancellationToken)
     {
         string watchFolder = Path.GetFullPath(WatchFolderTextBox.Text);
+        string? alignmentReferencePath = AlignmentReferencePath;
         SearchOption searchOption = IncludeSubdirectoriesToggle.IsOn
             ? SearchOption.AllDirectories
             : SearchOption.TopDirectoryOnly;
@@ -581,6 +646,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         string[] paths = await Task.Run(() => Directory
             .EnumerateFiles(watchFolder, "*", enumerationOptions)
             .Where(ImageFileService.IsStackableImage)
+            .Where(path => !StackSourceIdentity.RefersToSameFile(path, alignmentReferencePath))
             .Select(path => new FileInfo(path))
             .Where(file => file.Exists && file.Length > 0)
             .OrderBy(file => file.LastWriteTimeUtc)

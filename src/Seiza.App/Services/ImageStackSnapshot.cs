@@ -7,10 +7,12 @@ internal sealed class ImageStackSnapshot : IDisposable, IAsyncDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SafeStackSnapshotHandle? _handle;
     private bool _disposed;
+    private readonly string[] _protectedPaths;
 
-    internal ImageStackSnapshot(SafeStackSnapshotHandle handle)
+    internal ImageStackSnapshot(SafeStackSnapshotHandle handle, string[] protectedPaths)
     {
         _handle = handle;
+        _protectedPaths = (string[])protectedPaths.Clone();
         nint nativeHandle = handle.DangerousGetHandle();
         AcceptedFrames = checked((int)NativeMethods.GetStackSnapshotAcceptedFrames(nativeHandle));
         RejectedFrames = checked((int)NativeMethods.GetStackSnapshotRejectedFrames(nativeHandle));
@@ -32,6 +34,9 @@ internal sealed class ImageStackSnapshot : IDisposable, IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             await Task.Run(() =>
             {
+                // The native writer sees a staging filename. Guard the final
+                // destination too, before atomic publication can replace it.
+                StackOutputProtection.ValidateDestination(outputPath, _protectedPaths);
                 AtomicOutputFile.Write(
                     outputPath,
                     stagingPath =>

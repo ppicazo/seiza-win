@@ -428,7 +428,21 @@ internal sealed record ImageStackRequest(
     IReadOnlyList<string> Inputs,
     string OutputPath,
     ImageStackOptions Options,
-    ImageStackCalibration Calibration);
+    ImageStackCalibration Calibration)
+{
+    /// <summary>
+    /// Optional geometry-only image shared by channel stacks. It is never
+    /// included implicitly or used to select calibration/normalization.
+    /// </summary>
+    public string? AlignmentReferencePath { get; init; }
+
+    /// <summary>Native-ranked channel lights to try, best first (at most five).</summary>
+    public IReadOnlyList<string> ChannelReferenceCandidates { get; init; } = [];
+
+    public string[] InputsStartingWith(string referencePath) => new[] { referencePath }
+        .Concat(Inputs.Where(path => !LiveStackPath.Equals(path, referencePath)))
+        .ToArray();
+}
 
 internal sealed record ImageStackJob(ImageStackGroup Group, ImageStackRequest Request);
 
@@ -447,7 +461,7 @@ internal static class ImageStackValidation
         }
 
         string[] outputs = jobs
-            .Select(job => Path.GetFullPath(job.Request.OutputPath))
+            .Select(job => LiveStackPath.NormalizeForComparison(job.Request.OutputPath))
             .ToArray();
         if (outputs.Distinct(StringComparer.OrdinalIgnoreCase).Count() != outputs.Length)
         {
@@ -457,12 +471,12 @@ internal static class ImageStackValidation
         }
 
         var sources = new HashSet<string>(
-            jobs.SelectMany(job => SourcePaths(job.Request)).Select(Path.GetFullPath),
+            jobs.SelectMany(job => SourcePaths(job.Request)).Select(LiveStackPath.NormalizeForComparison),
             StringComparer.OrdinalIgnoreCase);
         if (outputs.Any(sources.Contains))
         {
             throw new ArgumentException(
-                "Choose output files that are not input or calibration files in this batch.",
+                "Choose output files that are not input or calibration files in this batch, including alignment reference images.",
                 nameof(jobs));
         }
     }
@@ -479,6 +493,25 @@ internal static class ImageStackValidation
         {
             throw new ArgumentException(validationMessage, nameof(request));
         }
+        if (request.AlignmentReferencePath is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(request.AlignmentReferencePath);
+            string alignmentPath = Path.GetFullPath(request.AlignmentReferencePath);
+            if (new[] { request.Calibration.BiasPath, request.Calibration.DarkPath, request.Calibration.FlatPath }
+                .OfType<string>().Any(path => LiveStackPath.Equals(path, alignmentPath)))
+            {
+                throw new ArgumentException("The alignment reference image must not be a calibration master.", nameof(request));
+            }
+        }
+        if (request.ChannelReferenceCandidates.Count > 5 ||
+            request.ChannelReferenceCandidates.Any(candidate =>
+                !request.Inputs.Any(input => LiveStackPath.Equals(input, candidate))) ||
+            request.ChannelReferenceCandidates.Select(LiveStackPath.NormalizeForComparison)
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count() != request.ChannelReferenceCandidates.Count ||
+            (request.ChannelReferenceCandidates.Count > 0 && request.AlignmentReferencePath is null))
+        {
+            throw new ArgumentException("Choose up to five distinct channel reference candidates from this stack's light frames.", nameof(request));
+        }
     }
 
     private static IEnumerable<string> SourcePaths(ImageStackRequest request) =>
@@ -487,6 +520,7 @@ internal static class ImageStackValidation
             request.Calibration.BiasPath,
             request.Calibration.DarkPath,
             request.Calibration.FlatPath,
+            request.AlignmentReferencePath,
         }.OfType<string>());
 }
 
@@ -581,7 +615,8 @@ internal sealed record ImageStackResult(
     IReadOnlyList<ImageStackDisposition> Dispositions,
     StackSnrAnalysis SnrAnalysis,
     string? SnrWarning,
-    string? TransientRemovalNote = null);
+    string? TransientRemovalNote = null,
+    StackAlignmentReferenceSelection? ReferenceSelection = null);
 
 internal sealed record ImageStackBatchResult(IReadOnlyList<ImageStackResult> Results)
 {

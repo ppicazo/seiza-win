@@ -97,6 +97,10 @@ internal sealed record LiveStackNativeState
     /// Null only for contexts written before this additive live-state field.
     /// </summary>
     public CalibrationFrameProbe? ReferenceFrame { get; init; }
+    /// <summary>Null in older cores, where the reference was always integrated.</summary>
+    public bool? ReferenceIntegrated { get; init; }
+    /// <summary>Separate geometry-only image, retained even when it is not a light.</summary>
+    public string? ReferenceImagePath { get; init; }
     /// <summary>
     /// Why the native core cannot integrate this stack again to remove
     /// transients, or null when it can. Advisory only: it takes no part in
@@ -123,6 +127,10 @@ internal sealed record LiveStackNativeState
             // when the manifest did capture it, it remains authoritative.
             (ReferenceFrame is not null &&
              !Equals(ReferenceFrame, other.ReferenceFrame)) ||
+            (ReferenceIntegrated is not null &&
+             ReferenceIntegrated != other.ReferenceIntegrated) ||
+            (ReferenceImagePath is not null &&
+             !LiveStackPath.Equals(ReferenceImagePath, other.ReferenceImagePath)) ||
             InputPaths is null ||
             other.InputPaths is null ||
             InputPaths.Length != other.InputPaths.Length)
