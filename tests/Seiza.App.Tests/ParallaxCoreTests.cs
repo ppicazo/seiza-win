@@ -205,6 +205,44 @@ public sealed class ParallaxCoreTests
         Assert.Equal(66 * 48 * 4, labelled.RenderBgraFrame(0).Length);
     }
 
+    [Fact]
+    public void DustMapsSwapReadBackAndWriteWithoutPreparingAgain()
+    {
+        using var fixture = new Fixture();
+        using var original = ParallaxCore.Prepare(fixture.Request);
+        Assert.False(original.Summary.DustGiven);
+        // One star is too few to count dust from.
+        Assert.Null(original.DustMap(4, 3));
+        Assert.Null(original.DustMap(4, 3, counted: true));
+        Assert.False(original.WriteDustMap(fixture.PathFor("none.png")));
+
+        // Opaque everywhere, at half the image's size.
+        float[] opaque = Enumerable.Repeat(1f, 48 * 32).ToArray();
+        using var painted = ParallaxCore.WithDustMap(original, opaque, 48, 32);
+        Assert.True(painted.Summary.DustGiven);
+        Assert.Equal(original.Summary.DetectedStars, painted.Summary.DetectedStars);
+        Assert.All(painted.DustMap(4, 3)!, value => Assert.Equal(1f, value));
+        string written = fixture.PathFor("dust.tif");
+        Assert.True(painted.WriteDustMap(written));
+        Assert.True(new FileInfo(written).Length > 0);
+
+        // Read back from the file, as after editing it in another program.
+        using var fromFile = ParallaxCore.WithDustMap(original, written);
+        Assert.True(fromFile.Summary.DustGiven);
+        Assert.All(fromFile.DustMap(8, 6)!, value => Assert.InRange(value, 0.999f, 1f));
+        Assert.Equal(66 * 48 * 4, fromFile.RenderBgraFrame(0).Length);
+
+        // Back to the counted dust, of which there is none here.
+        using var counted = ParallaxCore.WithDustMap(painted, (string?)null);
+        Assert.False(counted.Summary.DustGiven);
+        Assert.Null(counted.DustMap(4, 3));
+
+        // A map of another shape, and a missing file.
+        Assert.ThrowsAny<Exception>(() => ParallaxCore.WithDustMap(original, new float[20 * 20], 20, 20));
+        Assert.ThrowsAny<Exception>(() => ParallaxCore.WithDustMap(original, fixture.PathFor("missing.png")));
+        Assert.Throws<ArgumentException>(() => ParallaxCore.WithDustMap(original, new float[3], 2, 2));
+    }
+
     private sealed class Fixture : IDisposable
     {
         private readonly string _directory = Path.Combine(Path.GetTempPath(), "Seiza.App.Tests", "parallax-" + Guid.NewGuid().ToString("N"));
@@ -232,6 +270,8 @@ public sealed class ParallaxCoreTests
         }
 
         public void Dispose() => Directory.Delete(_directory, recursive: true);
+
+        internal string PathFor(string name) => Path.Combine(_directory, name);
 
         internal void WriteObjectCatalog()
         {

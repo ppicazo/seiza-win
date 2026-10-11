@@ -18,6 +18,9 @@ internal static class ParallaxCore
     public static Task<ParallaxVideo> ReconfigureAsync(ParallaxVideo video, ParallaxVideoSettings settings, IProgress<ParallaxEvent>? events = null, CancellationToken cancellationToken = default) =>
         Task.Run(() => Reconfigure(video, settings, events, cancellationToken), cancellationToken);
 
+    public static Task<ParallaxVideo> WithDustMapAsync(ParallaxVideo video, string? path, IProgress<ParallaxEvent>? events = null, CancellationToken cancellationToken = default) =>
+        Task.Run(() => WithDustMap(video, path, events, cancellationToken), cancellationToken);
+
     public static unsafe ParallaxTourPlan Plan(ParallaxRequest request, IProgress<ParallaxEvent>? events = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -46,6 +49,34 @@ internal static class ParallaxCore
         cancellationToken.ThrowIfCancellationRequested();
         using var scope = new EventScope(events, cancellationToken);
         nint result = NativeMethods.ReconfigureParallaxJson(video.Handle, settings.ToJson(), scope.Signal, &ReceiveEvent, scope.Context, out nint error);
+        return FinishVideo(result, error, scope);
+    }
+
+    // A new video of the same scene and camera with the dust map at `path`
+    // (white opaque; PNG, JPEG, TIFF, FITS or XISF), or the dust counted from
+    // the stars again when `path` is null. Only the dust changes; the native
+    // scene's planes and stars are shared, not prepared again.
+    public static unsafe ParallaxVideo WithDustMap(ParallaxVideo video, string? path, IProgress<ParallaxEvent>? events = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(video);
+        cancellationToken.ThrowIfCancellationRequested();
+        using var scope = new EventScope(events, cancellationToken);
+        nint result = NativeMethods.WithParallaxDustMapJson(video.Handle, ParallaxJson.SerializeDustMapPath(path), scope.Signal, &ReceiveEvent, scope.Context, out nint error);
+        return FinishVideo(result, error, scope);
+    }
+
+    // As above with the map painted in memory: `opacity` is `width` × `height`
+    // values row by row, 0 where clear to 1 where opaque.
+    public static unsafe ParallaxVideo WithDustMap(ParallaxVideo video, float[] opacity, int width, int height, IProgress<ParallaxEvent>? events = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(video); ArgumentNullException.ThrowIfNull(opacity);
+        if (width < 1 || height < 1 || opacity.Length != checked(width * height))
+            throw new ArgumentException("The dust map must hold one value for each of its pixels.", nameof(opacity));
+        cancellationToken.ThrowIfCancellationRequested();
+        using var scope = new EventScope(events, cancellationToken);
+        nint result, error;
+        fixed (float* values = opacity)
+            result = NativeMethods.WithParallaxDustMap(video.Handle, values, checked((uint)width), checked((uint)height), scope.Signal, &ReceiveEvent, scope.Context, out error);
         return FinishVideo(result, error, scope);
     }
 
@@ -162,6 +193,34 @@ internal sealed class ParallaxVideo : IDisposable
             if (error != 0) NativeMethods.FreeString(error);
         }
         cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    // The dust as a `width` × `height` map over the whole image, row by row,
+    // 0 clear to 1 opaque: the dust in use, or the dust counted from the stars
+    // even while a given map takes its place. Null when there is no such dust.
+    public unsafe float[]? DustMap(int width, int height, bool counted = false)
+    {
+        if (width < 1 || height < 1) throw new ArgumentOutOfRangeException(nameof(width), "The dust map needs a width and height.");
+        float[] opacity = new float[checked(width * height)];
+        int result;
+        nint error;
+        fixed (float* values = opacity)
+            result = NativeMethods.ReadParallaxDustMap(Handle, counted ? 1u : 0u, checked((uint)width), checked((uint)height),
+                values, checked((nuint)opacity.Length), out error);
+        if (result < 0) throw NativeString.TakeError(error, "Could not read the dust map.");
+        if (error != 0) NativeMethods.FreeString(error);
+        return result == 1 ? opacity : null;
+    }
+
+    // Write the dust to `path`, white opaque, in the format its extension
+    // names: 16-bit PNG or TIFF, or 32-bit float FITS or XISF, the size of
+    // the image. False when there is no such dust to write.
+    public bool WriteDustMap(string path, bool counted = false)
+    {
+        int result = NativeMethods.WriteParallaxDustMapJson(Handle, ParallaxJson.SerializeDustMapWrite(path, counted), out nint error);
+        if (result < 0) throw NativeString.TakeError(error, "Could not write the dust map.");
+        if (error != 0) NativeMethods.FreeString(error);
+        return result == 1;
     }
 
     public void Dispose() => Handle.Dispose();

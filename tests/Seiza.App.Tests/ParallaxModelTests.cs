@@ -81,13 +81,29 @@ public sealed class ParallaxModelTests
     }
 
     [Fact]
+    public void RequestNamesTheDustMapOnlyWhenOneIsChosen()
+    {
+        var request = new ParallaxRequest { Inputs = new() { Image = "image.png" } };
+        using (var document = JsonDocument.Parse(request.ToJson()))
+            Assert.False(document.RootElement.TryGetProperty("dustMap", out _));
+        request.Inputs.DustMap = "dust.xisf";
+        using var named = JsonDocument.Parse(request.ToJson());
+        Assert.Equal("dust.xisf", named.RootElement.GetProperty("dustMap").GetString());
+        Assert.Equal("{\"path\":\"dust.xisf\"}", ParallaxJson.SerializeDustMapPath("dust.xisf"));
+        Assert.Equal("{}", ParallaxJson.SerializeDustMapPath(null));
+        using var write = JsonDocument.Parse(ParallaxJson.SerializeDustMapWrite("dust.fits", true));
+        Assert.Equal("dust.fits", write.RootElement.GetProperty("path").GetString());
+        Assert.True(write.RootElement.GetProperty("counted").GetBoolean());
+    }
+
+    [Fact]
     public void CompleteReconfigurationNeverContainsSceneFields()
     {
         var composition = new ParallaxComposition();
         using var document = JsonDocument.Parse(composition.VideoSettings(false).ToJson());
         foreach (string key in new[] { "start", "dolly", "truck", "truckAngleDegrees", "pan", "zoom", "zoomEnd", "rotateDegrees", "easing", "quality", "growthLimit", "fadeFrom", "tour", "tourGlide", "tourTitles", "tourLoop", "seconds", "fps", "size", "overlay", "overlayDensity", "labels", "labelColor", "watermark" })
             Assert.True(document.RootElement.TryGetProperty(key, out _), key);
-        foreach (string key in new[] { "image", "wcs", "distanceFocus", "distanceParsecs", "smallStars", "online", "catalogDirectory", "autoTour" })
+        foreach (string key in new[] { "image", "wcs", "distanceFocus", "distanceParsecs", "smallStars", "online", "catalogDirectory", "autoTour", "dustMap" })
             Assert.False(document.RootElement.TryGetProperty(key, out _), key);
         Assert.False(document.RootElement.GetProperty("watermark").GetBoolean());
         composition.CreditEnabled = true;

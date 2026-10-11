@@ -8,7 +8,7 @@ using Windows.Storage;
 
 namespace Seiza.App.Services;
 
-internal enum ParallaxInputFile { Separator, Objects, ObjectDistances, StarDistances }
+internal enum ParallaxInputFile { Separator, Objects, ObjectDistances, StarDistances, DustMap }
 
 // One independent document snapshot. Native jobs retain handles/files until they return;
 // closing cancels publication, never detaches an in-flight native operation.
@@ -188,6 +188,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     }
     public Task ChooseInputAsync(ParallaxInputFile kind, string path)
     {
+        if (kind == ParallaxInputFile.DustMap) return ChooseDustMapAsync(path);
         if (!IsBusy)
         {
             if (!File.Exists(path) && !(kind == ParallaxInputFile.Objects && Directory.Exists(path))) throw new FileNotFoundException("The selected input was not found.", path);
@@ -195,7 +196,75 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         }
         return Task.CompletedTask;
     }
-    public void ClearInput(ParallaxInputFile kind) { if (!IsBusy) { _inputs.Remove(kind); Invalidate(true); } }
+    public void ClearInput(ParallaxInputFile kind)
+    {
+        if (IsBusy) return;
+        if (kind == ParallaxInputFile.DustMap) { _ = ClearDustMapAsync(); return; }
+        _inputs.Remove(kind); Invalidate(true);
+    }
+
+    // Dust maps. A prepared scene takes a new map without being prepared again:
+    // only its dust changes, and the result becomes the scene that refits and
+    // exports start from, so the map stays with them.
+    public bool HasDustMap => _inputs.ContainsKey(ParallaxInputFile.DustMap);
+    public bool CanReloadDustMap => HasDustMap && _scene is not null && !IsBusy && !_closed && Composition.Scene.Dust;
+    public bool CanExportDustMap => (_preview ?? _scene) is not null && !IsBusy && !_closed;
+    public string DustDescription => Summary switch
+    {
+        null => HasDustMap ? "The dust map applies when the scene is prepared." : "Dust is counted from the stars when the scene is prepared.",
+        { DustGiven: true } summary => $"Dust from the map: {summary.StarsInFrontOfDust:N0} stars seen through opaque dust fly in front of the nebula.",
+        _ => Composition.Scene.Dust ? "Dust counted from the stars." : "Dust dimming is off.",
+    };
+    private async Task ChooseDustMapAsync(string path)
+    {
+        if (IsBusy || _closed) return;
+        if (!File.Exists(path)) throw new FileNotFoundException("The selected dust map was not found.", path);
+        if (!Composition.Scene.Dust) { Error = "Turn on dust dimming to use a dust map."; Notify(); return; }
+        string full = Path.GetFullPath(path);
+        if (_scene is null) { _inputs[ParallaxInputFile.DustMap] = full; Invalidate(true); return; }
+        if (await SwapDustAsync(full, "Applying the dust map…")) _inputs[ParallaxInputFile.DustMap] = full;
+        Notify();
+    }
+    private async Task ClearDustMapAsync()
+    {
+        // Without a scene, or with the dust off, no prepared scene holds the map.
+        if (_scene is null || !Composition.Scene.Dust) { _inputs.Remove(ParallaxInputFile.DustMap); Notify(); return; }
+        if (await SwapDustAsync(null, "Returning to the dust counted from the stars…")) _inputs.Remove(ParallaxInputFile.DustMap);
+        Notify();
+    }
+    // Read the chosen map again, after it was edited in another program.
+    public async Task ReloadDustMapAsync()
+    {
+        if (!CanReloadDustMap || _inputs.GetValueOrDefault(ParallaxInputFile.DustMap) is not { } path) return;
+        await SwapDustAsync(path, "Reloading the dust map…");
+    }
+    private async Task<bool> SwapDustAsync(string? path, string message)
+    {
+        // The latest camera, so the preview keeps its framing.
+        if ((_preview ?? _scene) is not { } source) return false;
+        var (signal, generation) = Begin(message);
+        try
+        {
+            var video = await ParallaxCore.WithDustMapAsync(source, path, events: Events(generation), cancellationToken: signal.Token);
+            if (_closed || generation != _revision) { video.Dispose(); Finish(signal, null); return false; }
+            ReleasePreview(); _scene?.Dispose(); _scene = _preview = video; Summary = video.Summary;
+            Status = DustDescription;
+            Finish(signal, null); RequestFrame();
+            return true;
+        }
+        catch (Exception e) { Finish(signal, e); return false; }
+    }
+    public async Task ExportDustMapAsync(string path)
+    {
+        if (!CanExportDustMap || (_preview ?? _scene) is not { } video) return;
+        try
+        {
+            bool written = await Task.Run(() => video.WriteDustMap(path));
+            if (!_closed) Status = written ? $"Dust map written to {Path.GetFileName(path)}." : "This scene has no dust to export: dust dimming is off, or too few stars show to map it.";
+        }
+        catch (Exception e) { if (!_closed) Error = e.Message; }
+        Notify();
+    }
     public void PickDistanceReference() { PickingDestination = false; PickingDistance = true; ShowsSource = true; Notify(); }
     public void Pick(double x, double y)
     {
@@ -245,6 +314,8 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
                 Wcs = _wcs, CatalogDirectory = CatalogSettingsStore.LoadCatalogDirectory(), GaiaCache = cache,
                 Objects = _inputs.GetValueOrDefault(ParallaxInputFile.Objects), ObjectDistances = _inputs.GetValueOrDefault(ParallaxInputFile.ObjectDistances),
                 StarDistances = _inputs.GetValueOrDefault(ParallaxInputFile.StarDistances),
+                // The core refuses a dust map with the dust off.
+                DustMap = Composition.Scene.Dust ? _inputs.GetValueOrDefault(ParallaxInputFile.DustMap) : null,
                 RcAstroExecutable = AutomaticSeparation ? _inputs.GetValueOrDefault(ParallaxInputFile.Separator) : null, RcAstroHost = "seiza-win",
             });
     }

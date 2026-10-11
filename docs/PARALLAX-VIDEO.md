@@ -52,13 +52,36 @@ The editor exposes the same composition controls as the Mac implementation:
   online stellar distances, Gaia magnitude depth and optional distance/object
   input files.
 - Moving-star limit, remaining-star policy, background galaxies, dust dimming,
-  star growth/fade controls, catalogue/custom labels and credit.
+  dust maps, star growth/fade controls, catalogue/custom labels and credit.
 - Undo/redo, fitted-camera warnings, bounded automatic camera previews,
   timeline playback, progress/activity reporting and cancellation.
 
 Windows uses native file pickers and reveals a completed export in Explorer.
 Platform-specific application chrome and encoder availability differ from
 macOS; the shared scene and camera semantics do not.
+
+## Dust maps
+
+Dust dimming normally counts the dust from how few stars show through it. A
+**dust map** replaces that count with an image painted white where the dust is
+opaque and black where the sky is clear, at any size with the image's shape,
+as PNG, JPEG, TIFF, FITS or XISF. What lies behind the nebula dims by the map,
+and where it lets through 5% of the light or less (about 96% white) nothing
+behind can show, so a star seen there flies in front of the nebula.
+
+- **Export Dust Map…** writes the dust in use, the size of the image: a 16-bit
+  PNG or TIFF, or a 32-bit float FITS or XISF. Paint over it in an image editor.
+  An exported counted map can carry small opaque specks in clear sky; paint
+  them out, or the stars under them fly forward.
+- **Choose…** under *dust map* applies a map. On a prepared scene only the dust
+  changes: the scene is not prepared again, and the preview keeps its camera.
+- **Reload** reads the chosen map again after it was edited elsewhere.
+- **Reset** returns to the dust counted from the stars.
+
+The *Stars and dust* section says where the dust came from and how many stars
+the map brought in front. The map path lives with the open window, like the
+other input files; tour itineraries do not record it. Dust maps need dust
+dimming on.
 
 ## Offline distances
 

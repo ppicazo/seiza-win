@@ -78,9 +78,10 @@ test exist.
 
 This slice is audited against [seiza-mac #56](https://github.com/theatrus/seiza-mac/pull/56)
 at `48469d6f3588ac651cd13d3ba0689ac187583344` (2026-10-10), independently of the
-historical baseline above. It uses published `seiza-cabi 0.25.1` and
-`seiza-parallax 0.2.1`, with no vendored renderer or crate patch. It is included
-in the 0.8.0 release.
+historical baseline above. It shipped in the 0.8.0 release on published
+`seiza-cabi 0.25.1` and `seiza-parallax 0.2.1`; it now uses `seiza-cabi 0.26.0`
+and `seiza-parallax 0.3.0`, which add dust maps, with no vendored renderer or
+crate patch.
 
 | Capability | macOS #56 | Windows | Validation / remaining acceptance criterion |
 | --- | --- | --- | --- |

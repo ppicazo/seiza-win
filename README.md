@@ -35,8 +35,8 @@ encoder availability, and safety details.
 - Parallax windows keep their private source snapshot and remain usable after
   the original viewer closes. Export cancellation preserves existing files.
 
-This release uses published Seiza 0.25.1, stacking 0.27.0 and parallax 0.2.1
-crates, without vendored patches.
+This version uses published Seiza 0.26.0, stacking 0.28.0, parallax 0.3.0 and
+image-io 0.1.0 crates, without vendored patches.
 
 ![Native parallax workspace with aligned manual layers, solved coordinates and offline stellar distances](docs/images/parallax-video.jpg)
 
