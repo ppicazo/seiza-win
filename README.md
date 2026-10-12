@@ -27,8 +27,8 @@ core.
   map. Camera edits are preserved when changing dust; cancelled or failed
   exports leave existing files and source images untouched.
 
-This version uses published Seiza 0.27.0, stacking 0.29.0, parallax 0.4.0 and
-image-io 0.2.0 crates, without vendored patches. See the
+This version uses published Seiza 0.29.0, stacking 0.31.0, parallax 0.6.0 and
+image-io 0.4.0 crates, without vendored patches. See the
 [shared-reference guide](docs/STACKING-UPSTREAM.md) and
 [parallax guide](docs/PARALLAX-VIDEO.md).
 
@@ -50,7 +50,10 @@ encoder availability, and safety details.
 - Pick destinations on the image, preview camera moves, generate and edit
   multi-stop tours, and save portable tour itinerary JSON.
 - Configure star/background depth, offline distance catalogs, labels, output
-  size and frame rate. Export through Windows Media Foundation; encoder
+  size and frame rate.
+- Turn on **Automatic depth planes** to move catalogued nebulae, and clouds of
+  dust in front of the nebula, on planes at their own distances. The editor
+  lists each plane found, and a catalogued object can take a distance you give. Export through Windows Media Foundation; encoder
   availability depends on your machine.
 - Parallax windows keep their private source snapshot and remain usable after
   the original viewer closes. Export cancellation preserves existing files.

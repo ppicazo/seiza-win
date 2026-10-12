@@ -164,7 +164,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             UpdateActivity();
 
             string structure = $"{InspectorPicker.SelectedIndex}:{Composition.Motion}:{Session.SelectedStop}:" +
-                $"{Session.SelectedIndex}:" + string.Join(',', Composition.Labels.Select(label => label.Id));
+                $"{Session.SelectedIndex}:" + string.Join(',', Composition.Labels.Select(label => label.Id)) + ":" + PlaneRowsKey();
             if (_inspectorStructure != structure)
             {
                 _inspectorStructure = structure;
@@ -245,7 +245,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         _refreshControls.Add(() => { toggle.IsOn = get(); toggle.IsEnabled = enabled?.Invoke() ?? true; });
     }
 
-    private void Number(StackPanel panel, string title, Func<double> get, Action<double> set,
+    private NumberBox Number(StackPanel panel, string title, Func<double> get, Action<double> set,
         double minimum = double.MinValue, double maximum = double.MaxValue, double step = 1,
         Func<bool>? enabled = null)
     {
@@ -281,6 +281,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         };
         panel.Children.Add(number);
         _refreshControls.Add(() => { number.Value = get(); number.IsEnabled = enabled?.Invoke() ?? true; });
+        return number;
     }
 
     private void Text(StackPanel panel, string title, Func<string> get, Action<string> set,
@@ -430,6 +431,26 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         AsyncButton(dust, "Export Dust Map…", ExportDustMapAsync, () => Session.CanExportDustMap);
         Note(stars, value: () => Session.DustDescription);
 
+        StackPanel depthPlanes = Section("Depth planes");
+        Toggle(depthPlanes, "Automatic depth planes", () => Composition.Scene.AutoPlanes,
+            value => Session.Edit(c => c.Scene.AutoPlanes = value));
+        Note(depthPlanes, "Catalogued nebulae at distances of their own, and dust clouds in front of the nebula, move on planes of their own. A dark nebula moves with the dust it lies in.");
+        Note(depthPlanes, value: () => Session.PlanesDescription);
+        var (planes, others) = PlaneRows();
+        foreach (ParallaxPlane plane in planes) PlaneRow(depthPlanes, plane);
+        if (others.Count > 0)
+        {
+            depthPlanes.Children.Add(new TextBlock { Text = "Other distances you gave", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            foreach (string name in others)
+            {
+                StackPanel card = Card(depthPlanes);
+                card.Children.Add(new TextBlock { Text = name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+                GivenDistance(card, name, null);
+            }
+        }
+        if (others.Count > 0 || planes.Any(plane => plane.ObjectName is not null))
+            Note(depthPlanes, "A distance you give replaces the catalogue's, for the nebula's distance and its planes, when the scene is prepared.");
+
         StackPanel catalogues = Section("Catalogues and solving");
         Note(catalogues, value: () => string.IsNullOrWhiteSpace(Session.CatalogDirectoryPath)
             ? "Choose a catalogue directory in Catalogue Settings to enable solving and tour generation."
@@ -452,6 +473,55 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         details.Content = notes;
         summary.Children.Add(details);
         _refreshControls.Add(() => notes.Text = string.Join("\n", Session.PreparationNotes));
+    }
+
+    // The depth plane list: the planes found when the scene was last prepared,
+    // then any other objects given a distance. The inspector is rebuilt when
+    // these change, which happens only after a preparation or an edit here.
+    private (IReadOnlyList<ParallaxPlane> Planes, IReadOnlyList<string> Others) PlaneRows()
+    {
+        IReadOnlyList<ParallaxPlane> planes = Composition.Scene.AutoPlanes ? Session.ScenePlanes ?? [] : [];
+        List<string> others = (Composition.Scene.DistanceOverrides ?? []).Select(given => given.ObjectName)
+            .Where(name => !planes.Any(plane => ParallaxSceneSettings.SameObject(plane.ObjectName, name))).ToList();
+        return (planes, others);
+    }
+
+    private string PlaneRowsKey()
+    {
+        var (planes, others) = PlaneRows();
+        return string.Join('|', planes.Select(plane => plane.Name)) + "/" + string.Join('|', others);
+    }
+
+    private void PlaneRow(StackPanel panel, ParallaxPlane plane)
+    {
+        StackPanel card = Card(panel);
+        card.Children.Add(new TextBlock { Text = plane.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        Note(card, $"{plane.DistanceParsecs:N0} pc, {plane.Basis} · {plane.Coverage:P1} of the image" + (plane.Absorbs ? " · dark cloud" : string.Empty));
+        if (plane.ObjectName is string name) GivenDistance(card, name, plane.DistanceParsecs);
+        else Note(card, "No catalogued object names it, so its distance cannot be given here.");
+    }
+
+    // A distance for a catalogued object in place of the one found, and a way
+    // back to the one found.
+    private void GivenDistance(StackPanel card, string name, double? found)
+    {
+        NumberBox distance = Number(card, "Distance (pc)", () => Composition.Scene.DistanceOverride(name) ?? found ?? 1,
+            value => Session.SetDistanceOverride(name, value), 1, step: 10);
+        AutomationProperties.SetName(distance, $"Distance of {name} in parsecs");
+        Button reset = Button(card, "Reset", () => Session.SetDistanceOverride(name, null),
+            () => Composition.Scene.DistanceOverride(name) is not null);
+        AutomationProperties.SetName(reset, $"Reset the distance of {name}");
+    }
+
+    private static StackPanel Card(StackPanel panel)
+    {
+        var card = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new Border
+        {
+            Padding = new Thickness(10), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6),
+            BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"], Child = card,
+        });
+        return card;
     }
 
     private void BuildCameraInspector()
