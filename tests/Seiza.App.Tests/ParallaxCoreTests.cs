@@ -169,7 +169,7 @@ public sealed class ParallaxCoreTests
         }));
         // The fixture has no object distance file, so the core lifts no plane,
         // but it takes both fields, finds the named object and says why.
-        Assert.Contains(warnings, warning => warning.Contains("no automatic depth planes", StringComparison.Ordinal));
+        Assert.Contains(warnings, warning => warning.Contains("no catalogued nebulae as depth planes", StringComparison.Ordinal));
         Assert.Empty(video.Summary.Planes);
         // A name the catalogue does not know is refused.
         fixture.Request.Scene.SetDistanceOverride("NGC 404404", 150);

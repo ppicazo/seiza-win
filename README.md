@@ -27,8 +27,8 @@ core.
   map. Camera edits are preserved when changing dust; cancelled or failed
   exports leave existing files and source images untouched.
 
-This version uses published Seiza 0.27.0, stacking 0.29.0, parallax 0.4.0 and
-image-io 0.2.0 crates, without vendored patches. See the
+This version uses published Seiza 0.29.0, stacking 0.31.0, parallax 0.6.0 and
+image-io 0.4.0 crates, without vendored patches. See the
 [shared-reference guide](docs/STACKING-UPSTREAM.md) and
 [parallax guide](docs/PARALLAX-VIDEO.md).
 
