@@ -513,7 +513,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         AutomationProperties.SetName(reset, $"Reset the distance of {name}");
     }
 
-    private StackPanel Card(StackPanel panel)
+    private static StackPanel Card(StackPanel panel)
     {
         var card = new StackPanel { Spacing = 8 };
         panel.Children.Add(new Border
