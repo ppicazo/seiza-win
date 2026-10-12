@@ -53,6 +53,8 @@ The editor exposes the same composition controls as the Mac implementation:
   input files.
 - Moving-star limit, remaining-star policy, background galaxies, dust dimming,
   dust maps, star growth/fade controls, catalogue/custom labels and credit.
+- Automatic depth planes, with the planes found listed and distances given for
+  catalogued objects in place of the catalogue's.
 - Undo/redo, fitted-camera warnings, bounded automatic camera previews,
   timeline playback, progress/activity reporting and cancellation.
 
@@ -84,6 +86,40 @@ The *Stars and dust* section says where the dust came from and how many stars
 the map brought in front. The map path lives with the open window, like the
 other input files; tour itineraries do not record it. Dust maps need dust
 dimming on.
+
+## Depth planes
+
+With **Automatic depth planes** on, catalogued nebulae that lie at least 15%
+nearer or farther than the nebula move on planes of their own, at their own
+distances. A dark nebula moves with the cloud of dust it lies in. A cloud that
+holds the nebula stays with it; a cloud at least 15% in front of the nebula
+moves as one plane, placed by its dark nebulae's catalogued distances or, where
+the catalogue has none, by where the Gaia stars seen through it run short.
+Planes need the object catalogue and the object distance file
+(`object-distances.bin`); without them the scene is prepared with no planes and
+a warning says why.
+
+After preparation the *Depth planes* section lists each plane: its distance and
+how it was found, the share of the image it covers, and whether it is a dark
+cloud that blocks the light behind it. When the field has none, it says so.
+*Preparation details* names the dark nebulae that stay with the nebula's own
+dust.
+
+- **Distance (pc)** on a plane named after a catalogued object gives that
+  object a distance in place of the catalogue's. It applies when the scene is
+  prepared again; until then the list shows what the last preparation found.
+  Given for the nebula itself, a distance also sets the nebula's.
+- **Reset** drops the distance given.
+- A cloud of dust that no catalogued object names, placed by the star counts,
+  shows its distance but cannot be given one.
+- A distance given for an object that is no longer a plane, for instance one
+  moved to within 15% of the nebula, stays under *Other distances you gave*
+  until it is reset.
+
+Planes and given distances are scene settings, with undo: changing either
+prepares the scene again. A tour stop centres on the plane under its point, so
+a generated tour frames a stop on a plane at that plane's distance. Itineraries
+do not record the planes or the distances given.
 
 ## Offline distances
 

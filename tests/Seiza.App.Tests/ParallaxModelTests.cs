@@ -97,13 +97,111 @@ public sealed class ParallaxModelTests
     }
 
     [Fact]
+    public void RequestAsksForDepthPlanesAndGivenDistancesOnlyWhenSet()
+    {
+        var request = new ParallaxRequest { Inputs = new() { Image = "image.png" } };
+        using (var plain = JsonDocument.Parse(request.ToJson()))
+        {
+            Assert.False(plain.RootElement.TryGetProperty("autoPlanes", out _));
+            Assert.False(plain.RootElement.TryGetProperty("distanceOverrides", out _));
+        }
+        request.Scene.AutoPlanes = true;
+        request.Scene.SetDistanceOverride("vdB 2", 700);
+        using var asked = JsonDocument.Parse(request.ToJson());
+        Assert.True(asked.RootElement.GetProperty("autoPlanes").GetBoolean());
+        JsonElement given = asked.RootElement.GetProperty("distanceOverrides");
+        Assert.Equal(1, given.GetArrayLength());
+        Assert.Equal("vdB 2", given[0].GetProperty("object").GetString());
+        Assert.Equal(700, given[0].GetProperty("distanceParsecs").GetDouble());
+    }
+
+    [Fact]
+    public void AGivenDistanceReplacesOneForTheSameObjectAndResetDropsIt()
+    {
+        var scene = new ParallaxSceneSettings();
+        scene.SetDistanceOverride("LDN 1167", 300);
+        scene.SetDistanceOverride("vdB 2", 700);
+        ParallaxSceneSettings before = scene.DeepClone();
+        // The core finds objects by name whatever their case.
+        scene.SetDistanceOverride(" ldn 1167", 250);
+        Assert.Equal(["ldn 1167", "vdB 2"], scene.DistanceOverrides!.Select(given => given.ObjectName));
+        Assert.Equal(250, scene.DistanceOverride("LDN 1167"));
+        Assert.Equal(300, before.DistanceOverride("LDN 1167"));
+        Assert.Null(scene.DistanceOverride("NGC 7822"));
+        scene.RemoveDistanceOverride("LDN 1167");
+        Assert.Equal(["vdB 2"], scene.DistanceOverrides!.Select(given => given.ObjectName));
+        scene.RemoveDistanceOverride("VDB 2");
+        Assert.Null(scene.DistanceOverrides);
+    }
+
+    [Fact]
+    public void DepthPlanesAndGivenDistancesAreSceneFields()
+    {
+        // The session prepares the scene again when its settings differ.
+        var scene = new ParallaxSceneSettings();
+        ParallaxSceneSettings planes = scene.DeepClone();
+        planes.AutoPlanes = true;
+        Assert.False(scene.ContentEquals(planes));
+        ParallaxSceneSettings given = scene.DeepClone();
+        given.SetDistanceOverride("vdB 2", 700);
+        Assert.False(scene.ContentEquals(given));
+        ParallaxSceneSettings again = given.DeepClone();
+        again.SetDistanceOverride("vdB 2", 700);
+        Assert.True(given.ContentEquals(again));
+        again.SetDistanceOverride("vdB 2", 650);
+        Assert.False(given.ContentEquals(again));
+        again.RemoveDistanceOverride("vdB 2");
+        Assert.True(scene.ContentEquals(again));
+
+        var composition = new ParallaxComposition();
+        composition.Scene.SetDistanceOverride("vdB 2", 0);
+        Assert.Equal("Distances must be positive, finite parsec values.", composition.ValidationMessage);
+        composition.Scene.SetDistanceOverride("vdB 2", double.NaN);
+        Assert.Equal("Distances must be positive, finite parsec values.", composition.ValidationMessage);
+        composition.Scene.DistanceOverrides = [new() { ObjectName = " ", DistanceParsecs = 700 }];
+        Assert.Equal("The composition is incomplete.", composition.ValidationMessage);
+        composition.Scene.DistanceOverrides = null;
+        Assert.Null(composition.ValidationMessage);
+    }
+
+    [Fact]
+    public void SummaryNamesEachPlanesObjectWhenOneMovesIt()
+    {
+        const string json = """
+            {"schemaVersion":1,"frames":12,"fps":24,"width":66,"height":48,"backgroundDistanceParsecs":900,
+             "planes":[
+               {"name":"vdB 2","distanceParsecs":716.7,"basis":"measured, parallax","coverage":0.002,"absorbs":false,"object":"vdB 2"},
+               {"name":"dust cloud 1","distanceParsecs":300,"basis":"Gaia star counts, 70 stars in front, 250-340 pc","coverage":0.05,"absorbs":true,"object":null}]}
+            """;
+        ParallaxSummary summary = JsonSerializer.Deserialize(json, ParallaxJsonContext.Default.ParallaxSummary)!;
+        Assert.Equal(2, summary.Planes.Length);
+        Assert.Equal(new ParallaxPlane { Name = "vdB 2", DistanceParsecs = 716.7, Basis = "measured, parallax", Coverage = 0.002, ObjectName = "vdB 2" }, summary.Planes[0]);
+        Assert.True(summary.Planes[1].Absorbs);
+        Assert.Null(summary.Planes[1].ObjectName);
+        ParallaxSummary older = JsonSerializer.Deserialize("""{"schemaVersion":1,"frames":12}""", ParallaxJsonContext.Default.ParallaxSummary)!;
+        Assert.Empty(older.Planes);
+    }
+
+    [Fact]
+    public void APlannedStopOnADepthPlaneTakesThePlaneUnderItsPoint()
+    {
+        // The planner gives a stop on a plane its depth. The app leaves it out,
+        // so the stop centres on whatever plane the scene shows at its point.
+        const string json = """{"schemaVersion":1,"focus":[100,80],"focusName":"Target","seconds":7,"tour":[{"name":"Whole Image","travel":0,"hold":1},{"name":"Sh2-170","focus":[90,70],"dolly":0.88,"zoom":3.2,"pan":0.12,"travel":5,"hold":2,"title":"Sh2-170","depthParsecs":2790}]}""";
+        ParallaxTourPlan plan = ParallaxTourPlan.FromJson(json);
+        Assert.Equal(0.12, plan.Tour[1].Pan);
+        using var saved = JsonDocument.Parse(plan.ToJson());
+        Assert.False(saved.RootElement.GetProperty("tour")[1].TryGetProperty("depthParsecs", out _));
+    }
+
+    [Fact]
     public void CompleteReconfigurationNeverContainsSceneFields()
     {
         var composition = new ParallaxComposition();
         using var document = JsonDocument.Parse(composition.VideoSettings(false).ToJson());
         foreach (string key in new[] { "start", "dolly", "truck", "truckAngleDegrees", "pan", "zoom", "zoomEnd", "rotateDegrees", "easing", "quality", "growthLimit", "fadeFrom", "tour", "tourGlide", "tourTitles", "tourLoop", "seconds", "fps", "size", "overlay", "overlayDensity", "labels", "labelColor", "watermark" })
             Assert.True(document.RootElement.TryGetProperty(key, out _), key);
-        foreach (string key in new[] { "image", "wcs", "distanceFocus", "distanceParsecs", "smallStars", "online", "catalogDirectory", "autoTour", "dustMap" })
+        foreach (string key in new[] { "image", "wcs", "distanceFocus", "distanceParsecs", "smallStars", "online", "catalogDirectory", "autoTour", "dustMap", "autoPlanes", "distanceOverrides" })
             Assert.False(document.RootElement.TryGetProperty(key, out _), key);
         Assert.False(document.RootElement.GetProperty("watermark").GetBoolean());
         composition.CreditEnabled = true;

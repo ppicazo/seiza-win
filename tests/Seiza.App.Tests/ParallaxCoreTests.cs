@@ -156,6 +156,28 @@ public sealed class ParallaxCoreTests
     }
 
     [Fact]
+    public void DepthPlanesAndGivenDistancesReachTheCore()
+    {
+        using var fixture = new Fixture();
+        fixture.WriteObjectCatalog();
+        fixture.Request.Scene.AutoPlanes = true;
+        fixture.Request.Scene.SetDistanceOverride("ngc 9001", 150);
+        var warnings = new List<string>();
+        using var video = ParallaxCore.Prepare(fixture.Request, new InlineProgress<ParallaxEvent>(update =>
+        {
+            if (update.Kind == "warning" && update.Message is string message) warnings.Add(message);
+        }));
+        // The fixture has no object distance file, so the core lifts no plane,
+        // but it takes both fields, finds the named object and says why.
+        Assert.Contains(warnings, warning => warning.Contains("no automatic depth planes", StringComparison.Ordinal));
+        Assert.Empty(video.Summary.Planes);
+        // A name the catalogue does not know is refused.
+        fixture.Request.Scene.SetDistanceOverride("NGC 404404", 150);
+        Exception error = Assert.ThrowsAny<Exception>(() => ParallaxCore.Prepare(fixture.Request));
+        Assert.Contains("NGC 404404", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LoopClosureTimingAndTitleRefitMatchNativeWithoutRebuildingScene()
     {
         using var fixture = new Fixture();

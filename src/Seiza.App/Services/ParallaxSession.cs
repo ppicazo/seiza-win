@@ -306,6 +306,29 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
             if (resumeRefit && !cancelled) ScheduleRefit();
         }
     }
+    // Depth planes found when the scene was last prepared with automatic planes
+    // on, or null. They stay listed after a scene edit, so a distance can be
+    // given for one before the scene is prepared again.
+    public IReadOnlyList<ParallaxPlane>? ScenePlanes { get; private set; }
+    public string PlanesDescription => !Composition.Scene.AutoPlanes ? "Off: the starless image moves as one, at the nebula's distance." :
+        ScenePlanes switch
+        {
+            null => "Planes are found when the scene is prepared.",
+            { Count: 0 } when _scene is not null => "No catalogued nebula or dust cloud lies at a distance of its own.",
+            { Count: 0 } => "None found when the scene was last prepared. Prepare Preview to apply changes.",
+            _ when _scene is null => "Found when the scene was last prepared. Prepare Preview to apply changes.",
+            _ => string.Empty,
+        };
+    // A distance for a catalogued object in place of the catalogue's, or null
+    // to drop it. Either prepares the scene again.
+    public void SetDistanceOverride(string name, double? parsecs) => Edit(c =>
+    {
+        if (parsecs is double distance) c.Scene.SetDistanceOverride(name, distance);
+        else c.Scene.RemoveDistanceOverride(name);
+    });
+    private void KeepPlanes(ParallaxRequest request, ParallaxSummary summary) =>
+        ScenePlanes = request.Scene.AutoPlanes ? summary.Planes : null;
+
     public void PickDistanceReference() { PickingDestination = false; PickingDistance = true; ShowsSource = true; Notify(); }
     public void Pick(double x, double y)
     {
@@ -456,6 +479,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
             else
             {
                 ReleasePreview(); _scene?.Dispose(); _scene = _preview = video; Summary = video.Summary; _wcs = Summary.Wcs;
+                KeepPlanes(request, Summary);
                 Status = $"Preview ready. {Summary.WithDistance} of {Summary.DetectedStars} stars have catalog distances."; ShowsSource = false;
             }
             Finish(signal, null); RequestFrame();
@@ -564,7 +588,9 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
             // preview independently owned while replacing its scene reference.
             if (!ReferenceEquals(_scene, _preview)) _scene?.Dispose();
             _scene = video; retained = true;
-            Summary = video.Summary; _wcs = Summary.Wcs; Status = "Encoding video…"; Notify();
+            Summary = video.Summary; _wcs = Summary.Wcs; Status = "Encoding video…";
+            if (existing is null) KeepPlanes(request, Summary);
+            Notify();
             var progress = new Progress<ParallaxExportProgress>(p => { if (!_closed && IsBusy && ReferenceEquals(_operation, signal) && generation == _revision && !signal.IsCancellationRequested) { Progress = p.Fraction; Status = p.CompletedFrames == p.TotalFrames ? "Finalizing video…" : $"Encoding frame {p.CompletedFrames} of {p.TotalFrames}…"; Notify(); } });
             await ParallaxVideoExporter.ExportAsync(video, destination, codec, progress, signal.Token);
             if (!_closed) { ExportedPath = destination; Status = "Video exported."; }
