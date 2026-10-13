@@ -137,7 +137,7 @@ Windows CI.
     encoding through MediaStreamSource/MediaTranscoder; no pixel math is ported
     to C#. The separate `seiza-platform` DLL adapts only focused catalog
     status/setup through the published Rust download APIs, not a fork of the
-    shared C ABI. Core/C ABI 0.29.1 and parallax 0.6.1 come from published
+    shared C ABI. Core/C ABI 0.29.2 and parallax 0.6.2 come from published
     crates, with the upstream font notice included in the app. See
     [Parallax video](PARALLAX-VIDEO.md).
 

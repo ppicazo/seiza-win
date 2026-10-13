@@ -1591,9 +1591,9 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seiza"
-version = "0.29.1"
+version = "0.29.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b10e005a5561f75063902d22957078f17c57232c387b632d1fdc41d317ed6564"
+checksum = "52996ff423026e22a97bd5cefe2ef5a1971de4a3a3b27a24aa5367feec042064"
 dependencies = [
  "chrono",
  "directories",
@@ -1628,9 +1628,9 @@ dependencies = [
 
 [[package]]
 name = "seiza-cabi"
-version = "0.29.1"
+version = "0.29.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e442ef8906cefa53e6ae4a7c6adfe721c2124eb3244872bd7743c798931081b"
+checksum = "8271e79f7fb06f74cbbb57ed27c05eef702edbaa06db3761fc2a809ed71c9b78"
 dependencies = [
  "cbindgen",
  "image",
@@ -1760,9 +1760,9 @@ dependencies = [
 
 [[package]]
 name = "seiza-parallax"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52d3be9d8a90fccd87005d64b8672d87e35206d3a8fc250b760f4a6899810c61"
+checksum = "dc4e3e1e3fd052f36ba00181ddafc1cb9cb3e5712b71f23e82ba1d3e1affb492"
 dependencies = [
  "ab_glyph",
  "image",
