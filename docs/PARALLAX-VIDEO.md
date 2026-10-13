@@ -31,7 +31,7 @@ orientation without passing through the viewer's eight-bit display bitmap.
    it, then adjust the camera. Camera-only edits reuse the prepared scene;
    scene changes require preparation again.
 3. In **Labels**, configure object labels, custom point/radius labels, label
-   colour and an optional credit.
+   colour, an optional credit and logo, and title cards.
 4. In **Output**, choose dimensions, frame rate, native codec and render
    quality, then **Export Video**. Export fits the full-resolution camera and
    renders its frames independently of the smaller interactive preview.
@@ -44,7 +44,8 @@ The editor exposes the same composition controls as the Mac implementation:
   sideways swing and direction, and easing.
 - Automatic tours with target count, hold and motion controls; editable stops
   with point/whole-image focus, travel and hold, zoom, dolly, pan, roll, spin,
-  push and optional titles; stop insertion, duplication, reordering and removal.
+  push, optional titles and title cards; stop insertion, duplication,
+  reordering and removal.
 - Tour glide, titles, looping and JSON itinerary load/save. Shared schema-1
   itineraries remain portable; an itinerary is not a complete project archive
   and does not embed source images or separated layers.
@@ -52,7 +53,8 @@ The editor exposes the same composition controls as the Mac implementation:
   online stellar distances, Gaia magnitude depth and optional distance/object
   input files.
 - Moving-star limit, remaining-star policy, background galaxies, dust dimming,
-  dust maps, star growth/fade controls, catalogue/custom labels and credit.
+  dust maps, star growth/fade controls, catalogue/custom labels, credit, logo
+  and title cards.
 - Automatic depth planes, with the planes found listed and distances given for
   catalogued objects in place of the catalogue's.
 - Undo/redo, fitted-camera warnings, bounded automatic camera previews,
@@ -120,6 +122,34 @@ Planes and given distances are scene settings, with undo: changing either
 prepares the scene again. A tour stop centres on the plane under its point, so
 a generated tour frames a stop on a plane at that plane's distance. Itineraries
 do not record the planes or the distances given.
+
+Behind a lifted plane the image keeps only a smooth fill. Where a tour stop
+would show much of it, the fit flies that stop less far and zooms in to keep
+its target's size; the *Preview* section lists the change as the stop's dolly.
+
+## Logo and title cards
+
+Images with transparency, PNG or TIFF, can go over the video as well as text.
+
+- **Logo**, in the *Credit* section, draws an image in the credit's corner of
+  every frame. **Logo size** is its height as a share of the frame's shorter
+  side, 0.06 by default; it is never wider than a third of the frame. With
+  credit text too, the logo sits just inside the text. **Corner** and
+  **Opacity** move and fade the credit text and the logo alike.
+- **Opening card** and **Closing card**, in the *Title cards* section, show a
+  card over the start and the end, each for **Card seconds**. The opening card
+  shows whole from the first frame and fades out; the closing card fades in for
+  the end. A looping tour shows both across its join, so it still loops.
+- **Title card** on a tour stop shows a card during that stop, with the timing
+  a title has, in place of the title. It shows whether or not *Show stop
+  titles* is on.
+
+A card is fitted inside the frame and centred. Make it the video's size, such
+as 1920 × 1080, for sharp lettering. A card without transparency hides the
+frame while it shows, and one of another shape than the frame shrinks to fit;
+preparation warns of both. A file that cannot be read stops preparation with
+its name. Itineraries record each stop's card by its path; the logo and the
+opening and closing cards live with the open window.
 
 ## Offline distances
 

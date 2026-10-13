@@ -20,6 +20,9 @@ public sealed record ParallaxStop
     public double SpinDegrees { get; set; }
     public double Push { get; set; }
     public string? Title { get; set; }
+    // An image shown during this stop in place of its title, whether or not
+    // titles are shown: a title card with its transparency kept.
+    public string? Card { get; set; }
     [JsonIgnore] public string DisplayName => Name ?? (Focus is null ? "Whole Image" : "Custom Point");
     public ParallaxStop DeepClone() => this with { Focus = Focus?.ToArray() };
 }
@@ -124,11 +127,24 @@ public sealed record ParallaxLabel
     public string Text { get; set; } = "Label";
 }
 
+// The watermark: a line of text, an image such as a logo, or both, in one
+// corner. With no image and the corner, size and opacity at the core's
+// defaults it is sent as false or the text alone, as before images.
 [JsonConverter(typeof(ParallaxWatermarkConverter))]
 public sealed record ParallaxWatermark(string? Text)
 {
+    public const string DefaultCorner = "bottomRight";
+    public const double DefaultSize = 0.06;
+    public const double DefaultOpacity = 0.8;
+    public static readonly string[] Corners = ["bottomRight", "bottomLeft", "topRight", "topLeft"];
     public static ParallaxWatermark Disabled { get; } = new((string?)null);
     public static ParallaxWatermark FromText(string text) => new(text);
+    public string? Image { get; init; }
+    public string Corner { get; init; } = DefaultCorner;
+    // The image's height as a share of the frame's shorter side.
+    public double Size { get; init; } = DefaultSize;
+    public double Opacity { get; init; } = DefaultOpacity;
+    [JsonIgnore] public bool Plain => Image is null && Corner == DefaultCorner && Size == DefaultSize && Opacity == DefaultOpacity;
 }
 
 // Reconfigure takes COMPLETE camera/output settings; omitted fields take native
@@ -160,6 +176,10 @@ public sealed record ParallaxVideoSettings
     public List<ParallaxLabel> Labels { get; set; } = [];
     public string LabelColor { get; set; } = "#F0F4F8";
     public ParallaxWatermark Watermark { get; set; } = ParallaxWatermark.Disabled;
+    // Title cards over the start and the end, each shown for CardSeconds.
+    public string? IntroCard { get; set; }
+    public string? OutroCard { get; set; }
+    public double CardSeconds { get; set; } = 3;
     public string ToJson() => ParallaxJson.SerializeVideo(this);
 }
 
@@ -197,6 +217,16 @@ public sealed record ParallaxComposition
     public string LabelColor { get; set; } = "#F0F4F8";
     public bool CreditEnabled { get; set; }
     public string Credit { get; set; } = "Rendered with seiza.fyi";
+    // An image, such as a logo, in the credit's corner; the corner and opacity
+    // apply to the credit text as well.
+    public string? WatermarkImage { get; set; }
+    public string WatermarkCorner { get; set; } = ParallaxWatermark.DefaultCorner;
+    public double WatermarkSize { get; set; } = ParallaxWatermark.DefaultSize;
+    public double WatermarkOpacity { get; set; } = ParallaxWatermark.DefaultOpacity;
+    // Title cards: images with transparency over the start and the end.
+    public string? IntroCard { get; set; }
+    public string? OutroCard { get; set; }
+    public double CardSeconds { get; set; } = 3;
 
     public ParallaxComposition DeepClone() => this with
     {
@@ -265,6 +295,9 @@ public sealed record ParallaxComposition
             if (!double.IsFinite(OverlayDensity) || OverlayDensity is < 0 or > 1 || !Regex.IsMatch(LabelColor ?? string.Empty, "^#[0-9a-fA-F]{6}$", RegexOptions.CultureInvariant) ||
                 Labels.Any(label => label is null || !Finite(label.X, label.Y, label.Radius) || label.Radius < 0 || string.IsNullOrEmpty(label.Text)))
                 return "Labels need valid positions, nonnegative radii and a color in #RRGGBB format.";
+            if (!Finite(WatermarkSize, WatermarkOpacity, CardSeconds) || WatermarkSize is <= 0 or > 1 ||
+                WatermarkOpacity is < 0 or > 1 || CardSeconds <= 0 || !ParallaxWatermark.Corners.Contains(WatermarkCorner))
+                return "Check the watermark's corner, size and opacity, and the title cards' seconds.";
             if (Motion == ParallaxMotion.Tour)
             {
                 if (Stops.Count < 2) return "A tour needs at least two stops.";
@@ -300,7 +333,11 @@ public sealed record ParallaxComposition
             TourTitles = Motion == ParallaxMotion.Tour && TourTitles, TourLoop = Motion == ParallaxMotion.Tour && TourLoop,
             Seconds = Duration, Fps = Fps, Size = FormattableString.Invariant($"{width}x{height}"), Overlay = Overlay,
             OverlayDensity = OverlayDensity, Labels = Labels.Select(label => label with { }).ToList(), LabelColor = LabelColor,
-            Watermark = CreditEnabled ? ParallaxWatermark.FromText(Credit) : ParallaxWatermark.Disabled,
+            Watermark = new ParallaxWatermark(CreditEnabled ? Credit : null)
+            {
+                Image = WatermarkImage, Corner = WatermarkCorner, Size = WatermarkSize, Opacity = WatermarkOpacity,
+            },
+            IntroCard = IntroCard, OutroCard = OutroCard, CardSeconds = CardSeconds,
         };
     }
 
@@ -346,6 +383,10 @@ public sealed record ParallaxStopFit
 {
     public ParallaxFitValue Zoom { get; init; } = new();
     public ParallaxFitValue Pan { get; init; } = new();
+    // How far the camera flew in. The fit flies a stop less far, zooming in to
+    // keep its target's size, where it would show much of the smooth fill
+    // behind a depth plane. Null from a core too old to say.
+    public ParallaxFitValue? Dolly { get; init; }
 }
 public sealed record ParallaxFit
 {
@@ -366,7 +407,11 @@ public sealed record ParallaxFit
                 if (value.Changed) result.Add(string.Create(CultureInfo.InvariantCulture, $"{name}: {value.Asked:F2} → {value.Used:F2}"));
             }
             Add("Zoom", Zoom); Add("Pan", Pan); Add("Sideways lead", Lead); Add("Sideways motion", Truck);
-            for (int i = 0; i < Stops.Length; i++) { Add($"Stop {i + 1} zoom", Stops[i].Zoom); Add($"Stop {i + 1} pan", Stops[i].Pan); }
+            for (int i = 0; i < Stops.Length; i++)
+            {
+                Add($"Stop {i + 1} zoom", Stops[i].Zoom); Add($"Stop {i + 1} pan", Stops[i].Pan);
+                if (Stops[i].Dolly is { } dolly) Add($"Stop {i + 1} dolly", dolly);
+            }
             return result;
         }
     }

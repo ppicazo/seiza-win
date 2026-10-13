@@ -347,6 +347,22 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         Number(panel, field, () => get() ?? fallback, value => set(value), 0, enabled: () => get() is not null);
     }
 
+    // An image laid over the frames, its transparency kept: a logo or a title
+    // card. Its path is part of the draft, so choosing one can be undone.
+    private void ImagePicker(StackPanel panel, string title, Func<string?> get, Action<string?> set)
+    {
+        panel.Children.Add(new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap });
+        var row = ButtonRow(panel);
+        Button choose = AsyncButton(row, "Choose…", async () =>
+        {
+            if (await PickFileAsync(".png", ".tif", ".tiff") is { } path) set(path);
+        });
+        AutomationProperties.SetName(choose, $"Choose {title.ToLowerInvariant()}");
+        Button clear = Button(row, "Clear", () => set(null), () => get() is not null);
+        AutomationProperties.SetName(clear, $"Clear {title.ToLowerInvariant()}");
+        Note(panel, value: () => get() is { } path ? Path.GetFileName(path) : "None selected");
+    }
+
     private void InputPicker(StackPanel panel, ParallaxInputFile kind, string title)
     {
         panel.Children.Add(new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap });
@@ -578,6 +594,8 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             Text(stop, "On-screen title", () => SelectedStop()?.Title ?? string.Empty,
                 value => Session.EditStop(s => s.Title = string.IsNullOrWhiteSpace(value) ? null : value));
             Note(stop, "Shown during this stop when Show stop titles is enabled. Leave blank for no title.");
+            ImagePicker(stop, "Title card", () => SelectedStop()?.Card, path => Session.EditStop(s => s.Card = path));
+            Note(stop, "An image with transparency shown during this stop in place of its title, whether or not titles are shown. Make it the video's size for sharp lettering.");
             Button(stop, "Pick Destination", BeginPickDestination);
             Button(stop, "Use Whole Image", () => Session.EditStop(s =>
             { s.Focus = null; s.Name = "Whole Image"; s.Dolly = 0; s.Zoom = 1; s.Pan = 0; }));
@@ -679,6 +697,22 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         StackPanel credit = Section("Credit");
         Toggle(credit, "Show credit", () => Composition.CreditEnabled, value => Session.Edit(c => c.CreditEnabled = value));
         Text(credit, "Credit text", () => Composition.Credit, value => Session.Edit(c => c.Credit = value), () => Composition.CreditEnabled);
+        ImagePicker(credit, "Logo", () => Composition.WatermarkImage, path => Session.Edit(c => c.WatermarkImage = path));
+        Number(credit, "Logo size", () => Composition.WatermarkSize, value => Session.Edit(c => c.WatermarkSize = value),
+            0.01, 1, 0.01, () => Composition.WatermarkImage is not null);
+        Note(credit, "The logo's height as a share of the frame's shorter side; it is at most a third of the frame's width. With credit text, it sits just inside the text.");
+        Choice(credit, "Corner", () => Composition.WatermarkCorner, value => Session.Edit(c => c.WatermarkCorner = value),
+            ("bottomRight", "Bottom right"), ("bottomLeft", "Bottom left"), ("topRight", "Top right"), ("topLeft", "Top left"));
+        Number(credit, "Opacity", () => Composition.WatermarkOpacity, value => Session.Edit(c => c.WatermarkOpacity = value),
+            0, 1, 0.05);
+        Note(credit, "The corner and opacity apply to the credit text and the logo alike.");
+
+        StackPanel cards = Section("Title cards");
+        ImagePicker(cards, "Opening card", () => Composition.IntroCard, path => Session.Edit(c => c.IntroCard = path));
+        ImagePicker(cards, "Closing card", () => Composition.OutroCard, path => Session.Edit(c => c.OutroCard = path));
+        Number(cards, "Card seconds", () => Composition.CardSeconds, value => Session.Edit(c => c.CardSeconds = value),
+            0.1, 600, 0.5);
+        Note(cards, "Images with transparency, fitted inside the frame and centred: make them the video's size for sharp lettering. The opening card shows from the first frame and fades out; the closing card fades in for the end. A looping tour shows both across its join, so it still loops. A tour stop can carry a card of its own.");
     }
 
     private void BuildOutputInspector()
