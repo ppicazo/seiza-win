@@ -9,9 +9,9 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-quick-xml = "0.41.0"
-seiza-fits = "0.2.2"
-seiza-xisf = "0.3.0"
+quick-xml = "0.42.0"
+seiza-fits = "0.3.0"
+seiza-xisf = "0.4.0"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [
