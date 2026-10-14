@@ -1,6 +1,6 @@
 # Shared-reference stacking integration
 
-Seiza for Windows 0.8.1 integrates upstream
+Introduced in Seiza for Windows 0.8.1, shared-reference stacking integrates upstream
 [Seiza #245](https://github.com/theatrus/seiza/pull/245),
 [#246](https://github.com/theatrus/seiza/pull/246), and
 [#247](https://github.com/theatrus/seiza/pull/247).
@@ -11,8 +11,8 @@ Python and does not require another Windows API.
 
 ## Published core and capability detection
 
-The integration ships with published `seiza-cabi`/`seiza` 0.30.0 and
-`seiza-stacking` 0.31.0, which include #245, #246, and #247. Production Cargo
+Windows 0.8.2 ships with published `seiza-cabi`/`seiza` 0.30.1 and
+`seiza-stacking` 0.32.0, which include #245, #246, and #247. Production Cargo
 manifests and the lockfile use registry dependencies only. Do not vendor or
 ship an unreleased Git/path override.
 

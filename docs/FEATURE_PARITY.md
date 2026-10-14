@@ -83,7 +83,11 @@ historical baseline above. It shipped in the 0.8.0 release on published
 `seiza-cabi 0.27.0` and `seiza-parallax 0.4.0`, including dust maps, with no
 vendored renderer or crate patch. Dust-map round trips, live camera edits,
 source protection, cancellation and safe workspace closure have additional
-automated coverage beyond that original parity audit.
+automated coverage beyond that original parity audit. Windows 0.8.2 uses
+published `seiza-cabi 0.30.1` and `seiza-parallax 0.7.0`, adding prepared-scene
+tour generation, custom plane masks/stop depths, painted dust, artwork and
+PNG/MOV/MKV output. Automated and actual-session validation does not imply a
+manual UI pass for these new controls.
 
 | Capability | macOS #56 | Windows | Validation / remaining acceptance criterion |
 | --- | --- | --- | --- |
@@ -94,7 +98,10 @@ automated coverage beyond that original parity audit.
 | Scene preparation, immutable refit and bounded preview | Available | **Complete** | Actual C ABI integration checks random frame rendering, padded BGRA, scene reuse after input removal, concurrent handles, native fit warnings and cancellation/retry. The published renderer's 88 library tests pass. |
 | Focused offline distances | Available | **Complete** | Native adapter selects the exact three datasets, validates header coverage and integrity, and tests narrow corrupt-cache repair entirely offline. Catalog changes invalidate prepared scenes. |
 | Silent native H.264 MP4 export | Available | **Complete** | Windows-runtime tests encode and decode MP4, verifying exact sample count, dimensions, FPS, duration, color, top-down orientation, silence, bounded buffers and cancellation/failure preservation. Real Iris TIFF layers produced a 1280 × 720, 48-frame movie at 24 fps with all eight source-folder files hash-identical. |
-| Automatic depth planes and given object distances | Not in #56 | **Partial** | Uses published `seiza-cabi` 0.30.0. Requests carry `autoPlanes` and `distanceOverrides` only when set; summaries decode planes with and without an object; a given distance replaces one for the same object, and either field prepares the scene again. A native test sends both through the C ABI. The WinUI section still needs interactive QA on a field with planes. |
+| Automatic/custom depth planes and given object distances | Not in #56 | **Partial** | Uses published `seiza-cabi` 0.30.1. Requests carry `autoPlanes`, custom mask planes and `distanceOverrides`; arbitrary named overrides replace case-insensitive matches. Native tests verify actual masked-plane rendering and distance overrides, and actual Session checks cover invalidation and undo. Same-name plane cards refresh their metadata. The WinUI section still needs interactive QA on a field with planes. |
+| Prepared-scene tours and explicit stop depths | Not in #56 | **Partial** | The released planner generates candidates at full output size on the retained scene; applying preserves the distance reference and target depths. Imported file itineraries preserve authored depths independently from catalogue-plan semantics; moving a stop focus clears its old override. Model/native and actual-session checks pass; new controls still need interactive QA. |
+| Dust painting | Not in #56 | **Partial** | Native Windows paint/clear brushes, undo/redo/reset and Apply/Cancel use independent bounded drafts. Pure brush tests and actual-session checks verify private 16-bit map persistence, cancellation, pending camera edits and reprepare. Computer Use could not bind the isolated window, so interactive brush verification remains unconfirmed. |
+| PNG sequences and optional MOV/MKV export | Not in #56 | **Partial** | Actual Windows tests verify lossless native-frame PNG parity and new-folder publication; isolated FFmpeg tests verify MOV/MKV H.264, HEVC MOV, timing/colour, cancellation and process cleanup. Export-dialog interaction remains unconfirmed. Windows' half-rate MKV metadata discrepancy is documented; container and decoded timing are correct. |
 | Logo and title cards | Not in #56 | **Partial** | Requests send the watermark as `false` or the text until a logo, corner, size or opacity is set, then as the core's `{text, image, corner, size, opacity}` object; `introCard`, `outroCard`, `cardSeconds` and a stop's `card` go with the video settings, and saved tours keep each stop's card. Model tests cover the JSON and validation. The WinUI controls still need interactive QA with real artwork. |
 | Native HEVC MP4 export | Available | **Partial** | Choice and native encoder integration are implemented. This machine lacks an HEVC encoder; its actionable error and preservation of previous output are tested. Successful HEVC encoding needs an encoder-equipped machine. |
 

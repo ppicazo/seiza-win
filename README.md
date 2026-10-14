@@ -8,7 +8,7 @@ a finished image into a camera tour with depth, motion, and titles. Seiza pairs
 a WinUI 3 interface and GPU-backed viewport with the shared
 [Seiza](https://github.com/theatrus/seiza) Rust imaging core.
 
-[Download Seiza for Windows 0.8.1 (x64)](https://github.com/theatrus/seiza-win/releases/download/v0.8.1/seiza-0.8.1-windows-x86_64.msi)
+[Download Seiza for Windows 0.8.2 (x64)](https://github.com/theatrus/seiza-win/releases/download/v0.8.2/seiza-0.8.2-windows-x86_64.msi)
 · [Release notes and previous versions](https://github.com/theatrus/seiza-win/releases)
 
 **Also from Seiza:** [Core, CLI, and libraries](https://github.com/theatrus/seiza) ·
@@ -17,7 +17,7 @@ a WinUI 3 interface and GPU-backed viewport with the shared
 
 ## Features
 
-- **[Parallax videos and tours](#parallax-videos-and-tours)** — Turn an astrophoto into a fly-in or editable camera tour, then export H.264 or HEVC video.
+- **[Parallax videos and tours](#parallax-videos-and-tours)** — Turn an astrophoto into a depth-aware camera tour with painted dust and title cards, then export video or lossless PNG frames.
 - **[Image viewing and folder review](#image-viewing-and-folder-review)** — Open FITS, XISF, and raster images; browse a whole night with cached thumbnails and fast previews.
 - **[Stretch and image processing](#stretch-and-image-processing)** — Build live stretch recipes, correct backgrounds, and apply light deconvolution.
 - **[Directory and live stacking](#directory-image-stacking)** — Align and combine selected frames or [watch a capture folder](#live-folder-stacking), with calibration, shared-reference alignment, and resumable sessions.
@@ -60,29 +60,32 @@ separately installed RC-Astro CLI (`rc-astro.exe`) licensed for StarXTerminator.
 Manual-layer solving uses the selected stars even when the viewer contains
 the starless image.
 
-- Generate a multi-stop tour or pick destinations directly on the image. Edit
-  travel, holds, zoom, pan and roll; save and load portable tour itinerary JSON.
+- Generate a multi-stop tour on the prepared scene or pick destinations directly
+  on the image. Edit travel, holds, zoom, pan, roll and target depth; save and load
+  portable tour itinerary JSON with artwork references.
 - Preview, play and scrub your camera move. Tune star and background depth,
-  use offline distance catalogs, and add object labels, titles and a credit.
-- Choose a custom dust-opacity map, reload it after editing, reset to counted
-  dust, or export a 16-bit PNG/TIFF or float FITS/XISF map. Camera edits are
-  preserved when changing dust.
+  use offline distance catalogs, and add object labels, a credit logo and
+  opening, closing or per-stop title-card images.
+- Paint a dust-opacity map with soft paint/clear brushes, undo and redo, or
+  choose an existing map. Export current or counted dust as 16-bit PNG/TIFF or
+  float FITS/XISF. Camera edits are preserved when changing dust.
 - Export silent MP4 in landscape or portrait, with presets up to 4K and native
-  H.264 or HEVC encoding. HEVC requires an available Windows encoder.
+  H.264/HEVC encoding; PNG sequences are lossless. Optional existing FFmpeg
+  enables MOV/MKV export. Native HEVC requires an available Windows encoder.
 - Keep your source images untouched. The independent workspace retains a
   private snapshot after the viewer closes, and a cancelled export preserves
   an existing movie.
 
 ![Native Windows camera controls with automatic tour generation, editable stops and a timeline preview](docs/images/parallax-tour-camera.jpg)
 
-Current `main` builds also offer **Automatic depth planes**: catalogued nebulae
+**Automatic depth planes** let catalogued nebulae
 at different distances and foreground dust clouds move on planes of their own.
-Inspect the detected planes and give a catalogued object a distance of your
-own. These controls are newer than the downloadable 0.8.1 release.
+Inspect the detected planes, give any named object a distance of your own,
+or add a custom image-mask plane with an explicit name and distance.
 
 See the [Windows parallax guide](docs/PARALLAX-VIDEO.md) for layer requirements,
-camera and tour controls, encoder availability and export limits. Current
-`main` builds use published Seiza 0.30.1, stacking 0.32.0, parallax 0.7.0 and
+camera and tour controls, encoder availability and export limits. Windows
+0.8.2 uses published Seiza 0.30.1, stacking 0.32.0, parallax 0.7.0 and
 image-io 0.5.0 crates, without vendored patches.
 
 ## Image viewing and folder review
@@ -99,21 +102,23 @@ RGB histograms, searchable source headers, and processing provenance.
 
 ![Image thumbnails displayed in the directory sidebar](docs/images/directory-thumbnails.jpg)
 
-## Seiza for Windows 0.8.1: shared-reference stacking and dust maps
+## Seiza for Windows 0.8.2: depth-aware tours, painted dust and more exports
 
-- Use one **shared alignment reference** across filter stacks so their FITS
-  outputs share dimensions and WCS, while each channel keeps its own reference
-  for calibration, brightness normalization, and noise weighting.
-- Automatic reference selection can try up to five native-ranked channel
-  lights and report why earlier candidates could not align. Live stacking
-  supports the same geometry-only reference and retains the saved grid on resume.
-- In the parallax editor, choose a custom dust-opacity map, reload it after
-  editing, reset to counted dust, or export a 16-bit PNG/TIFF or float FITS/XISF
-  map. Camera edits are preserved when changing dust; cancelled or failed
-  exports leave existing files and source images untouched.
+- Generate editable tours on the prepared scene, keeping the depth of each
+  destination and the scene's distance reference. Set explicit stop depths,
+  custom mask-defined planes and arbitrary named object distances.
+- Paint or clear dust with soft brushes and undo/redo. Applied maps persist
+  across preparation, while cancelled edits preserve the current map.
+- Add a logo and opening, closing or stop title cards; move saved itineraries
+  with portable artwork references. Plane metadata refreshes correctly.
+- Export native MP4, lossless PNG sequences, or MOV/MKV through optional
+  FFmpeg. Original and previously selected inputs stay protected from export
+  overwrites; failed or cancelled jobs preserve existing files.
+- Refresh the FITS/XISF shell-reader dependencies with bounded decoding and
+  compatibility fixes for the updated XML parser.
 
-The 0.8.1 release shipped with published Seiza 0.27.0, stacking 0.29.0,
-parallax 0.4.0 and image-io 0.2.0 crates, without vendored patches. See the
+This release retains shared-reference filter stacking and resumable live
+stacking from 0.8.1. See the [0.8.2 release notes](docs/releases/v0.8.2.md),
 [shared-reference guide](docs/STACKING-UPSTREAM.md) and
 [parallax guide](docs/PARALLAX-VIDEO.md).
 
@@ -388,8 +393,8 @@ remaining macOS and Windows integration work.
 
 ## Install
 
-Download the [Seiza for Windows 0.8.1 x64 MSI](https://github.com/theatrus/seiza-win/releases/download/v0.8.1/seiza-0.8.1-windows-x86_64.msi).
-Its [SHA-256 checksums](https://github.com/theatrus/seiza-win/releases/download/v0.8.1/SHA256SUMS.txt)
+Download the [Seiza for Windows 0.8.2 x64 MSI](https://github.com/theatrus/seiza-win/releases/download/v0.8.2/seiza-0.8.2-windows-x86_64.msi).
+Its [SHA-256 checksums](https://github.com/theatrus/seiza-win/releases/download/v0.8.2/SHA256SUMS.txt)
 are published beside it. The installer places Seiza in
 `Program Files\Seiza for Windows` for every user, adds a shared Start Menu
 shortcut, and registers `.fit`, `.fits`, `.fts`, and `.xisf` with Windows
@@ -454,7 +459,7 @@ Build the self-contained all-users WiX MSI:
 ```powershell
 dotnet build packaging\windows\Seiza.App.wixproj `
   -c Release `
-  -p:SeizaVersion=0.8.1
+  -p:SeizaVersion=0.8.2
 ```
 
 The installer is written to `dist`. See the
