@@ -163,26 +163,26 @@ fn inspect_xisf(bytes: &[u8]) -> Result<ImageLayout, String> {
             .map_err(|error| format!("invalid XISF XML header: {error}"))?
         {
             Event::Start(element)
-                if element.local_name().as_ref() == b"Image" && layout.is_none() =>
+                if element.local_name().as_ref() == "Image" && layout.is_none() =>
             {
                 layout = Some(xisf_image_layout(&element)?);
                 inside_first_image = true;
             }
             Event::Empty(element)
-                if element.local_name().as_ref() == b"Image" && layout.is_none() =>
+                if element.local_name().as_ref() == "Image" && layout.is_none() =>
             {
                 layout = Some(xisf_image_layout(&element)?);
                 break;
             }
             Event::Start(element) | Event::Empty(element)
-                if inside_first_image && element.local_name().as_ref() == b"ColorFilterArray" =>
+                if inside_first_image && element.local_name().as_ref() == "ColorFilterArray" =>
             {
                 if let Some(layout) = &mut layout {
                     layout.bayer = true;
                 }
             }
             Event::End(element)
-                if inside_first_image && element.local_name().as_ref() == b"Image" =>
+                if inside_first_image && element.local_name().as_ref() == "Image" =>
             {
                 break;
             }
@@ -202,12 +202,13 @@ fn xisf_image_layout(element: &BytesStart<'_>) -> Result<ImageLayout, String> {
     for attribute in element.attributes() {
         let attribute =
             attribute.map_err(|error| format!("invalid XISF image attribute: {error}"))?;
-        let value = std::str::from_utf8(attribute.value.as_ref())
-            .map_err(|_| "XISF image attribute is not UTF-8")?;
+        // quick-xml validates UTF-8 while reading events and exposes names and
+        // raw attribute values as strings starting with 0.42.
+        let value = attribute.value.as_ref();
         match attribute.key.as_ref() {
-            b"geometry" => geometry = Some(value.to_string()),
-            b"sampleFormat" => sample_format = Some(value.to_string()),
-            b"compression" => compressed = true,
+            "geometry" => geometry = Some(value.to_string()),
+            "sampleFormat" => sample_format = Some(value.to_string()),
+            "compression" => compressed = true,
             _ => {}
         }
     }
@@ -274,7 +275,7 @@ fn trim_ascii(mut value: &[u8]) -> &[u8] {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_image_budget;
+    use super::{ImageLayout, inspect_xisf, validate_image_budget};
 
     fn fits_header(width: u64, height: u64, planes: u64, bitpix: i64, bayer: bool) -> Vec<u8> {
         fn card(keyword: &str, value: &str) -> [u8; 80] {
@@ -312,12 +313,70 @@ mod tests {
         let header = format!(
             "<?xml version=\"1.0\"?><x:xisf xmlns:x=\"urn:test\"><x:Image geometry=\"{geometry}\" sampleFormat=\"{sample_format}\"{compression}/></x:xisf>"
         );
+        xisf_xml_header(header.as_bytes())
+    }
+
+    fn xisf_xml_header(header: &[u8]) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(b"XISF0100");
         bytes.extend_from_slice(&(header.len() as u32).to_le_bytes());
         bytes.extend_from_slice(&[0; 4]);
-        bytes.extend_from_slice(header.as_bytes());
+        bytes.extend_from_slice(header);
         bytes
+    }
+
+    #[test]
+    fn reads_namespaced_xisf_image_attributes_as_strings() {
+        assert_eq!(
+            inspect_xisf(&xisf_header("1200:800:3", "Float32", "zstd:11520000"))
+                .expect("read namespaced, self-closing image"),
+            ImageLayout {
+                width: 1200,
+                height: 800,
+                planes: 3,
+                bytes_per_sample: 4,
+                compressed: true,
+                bayer: false,
+            }
+        );
+    }
+
+    #[test]
+    fn reads_nested_bayer_metadata_and_stops_after_first_image() {
+        for cfa in [
+            "<x:ColorFilterArray/>",
+            "<x:ColorFilterArray></x:ColorFilterArray>",
+        ] {
+            let header = format!(
+                "<x:xisf xmlns:x=\"urn:test\"><x:Image geometry=\"1200:800:1\" sampleFormat=\"UInt16\">{cfa}</x:Image><x:Image geometry=\"50000:50000:3\" sampleFormat=\"Float64\"/></x:xisf>"
+            );
+            assert_eq!(
+                inspect_xisf(&xisf_xml_header(header.as_bytes()))
+                    .expect("read first image and its Bayer flag"),
+                ImageLayout {
+                    width: 1200,
+                    height: 800,
+                    planes: 1,
+                    bytes_per_sample: 2,
+                    compressed: false,
+                    bayer: true,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_utf8_in_xisf_attributes() {
+        let header = b"<xisf><Image geometry=\"2:2:1\" sampleFormat=\"UInt\xFF16\"/></xisf>";
+        let error = inspect_xisf(&xisf_xml_header(header)).expect_err("invalid UTF-8");
+        assert!(error.contains("invalid XISF XML header"), "{error}");
+    }
+
+    #[test]
+    fn rejects_invalid_xisf_geometry_before_decoding() {
+        let error = validate_image_budget(&xisf_header("huge:800:1", "UInt16", ""))
+            .expect_err("invalid geometry");
+        assert!(error.contains("invalid XISF geometry"), "{error}");
     }
 
     #[test]
