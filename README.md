@@ -1,9 +1,12 @@
 # Seiza for Windows
 
-Seiza is a fast, native Windows astronomy image viewer and plate-solving app.
-It combines a modern WinUI 3 interface and GPU-backed viewport with the shared
-[Seiza](https://github.com/theatrus/seiza) Rust image, catalog, and solving
-core.
+**A native Windows workspace for astronomy images, stacking, and parallax video.**
+
+Open one image or a whole night of captures. Stretch FITS or XISF data, inspect
+headers, plate-solve a frame, and see the stars and deep-sky objects in it. Turn
+a finished image into a camera tour with depth, motion, and titles. Seiza pairs
+a WinUI 3 interface and GPU-backed viewport with the shared
+[Seiza](https://github.com/theatrus/seiza) Rust imaging core.
 
 [Download Seiza for Windows 0.8.1 (x64)](https://github.com/theatrus/seiza-win/releases/download/v0.8.1/seiza-0.8.1-windows-x86_64.msi)
 · [Release notes and previous versions](https://github.com/theatrus/seiza-win/releases)
@@ -12,7 +15,89 @@ core.
 [Seiza for Mac](https://github.com/theatrus/seiza-mac) ·
 [FITS and XISF for Photoshop](https://github.com/theatrus/xisf-photoshop)
 
-![A solved NGC 7000 FITS image with WCS grid, catalog overlays, solution summary, and histogram inspector](docs/images/solved-overlays.png)
+## Features
+
+- **[Parallax videos and tours](#parallax-videos-and-tours)** — Turn an astrophoto into a fly-in or editable camera tour, then export H.264 or HEVC video.
+- **[Image viewing and folder review](#image-viewing-and-folder-review)** — Open FITS, XISF, and raster images; browse a whole night with cached thumbnails and fast previews.
+- **[Stretch and image processing](#stretch-and-image-processing)** — Build live stretch recipes, correct backgrounds, and apply light deconvolution.
+- **[Directory and live stacking](#directory-image-stacking)** — Align and combine selected frames or [watch a capture folder](#live-folder-stacking), with calibration, shared-reference alignment, and resumable sessions.
+- **[Plate solving and sky overlays](#plate-solving-and-sky-overlays)** — Solve locally, identify stars and deep-sky objects, and export WCS solutions.
+- **[Star and tilt measurement](#star-and-sensor-tilt-analysis)** — Measure stellar quality and sensor tilt, with optional parallelogram and triangle diagrams.
+- **[Catalogs and distance data](#catalogs-and-distance-data)** — Download and verify solver catalogs and offline parallax distances from native controls.
+- **[Image export and Explorer integration](#image-export-and-explorer-integration)** — Save full-size images with overlays and preview FITS/XISF files in Windows Explorer.
+
+## Parallax videos and tours
+
+Turn a finished image into a fly-in or multi-stop video tour.
+Star-catalog distances and adjustable scene depth make
+nearby stars move against the nebula as the camera travels. Plan a route
+yourself or generate one, then preview and export it in a native Windows editor.
+
+![The native Windows parallax editor showing an Iris Nebula preview, editable tour stops, timeline and MP4 export controls](docs/images/parallax-tour-export.jpg)
+
+### Watch the results
+
+These published examples use Seiza's shared parallax renderer. Click a preview
+to open its video player on theatr.us; the gallery includes both landscape and
+portrait compositions.
+
+| Iris Nebula · NGC 7023 | The Question Mark · Sh2-171 / Sh2-170 |
+| --- | --- |
+| <a href="https://theatr.us/gallery/detail/astrobin/iris-nebula/288w86"><img src="https://theatr.us/gallery/_image/astrobin/iris-nebula/288w86/medium" height="240" alt="Watch the Iris Nebula parallax tour" /></a> | <a href="https://theatr.us/gallery/detail/astrobin/big-q/29k8tr"><img src="https://theatr.us/gallery/_image/astrobin/big-q/29k8tr/medium" height="240" alt="Watch the portrait Question Mark Nebula parallax tour" /></a> |
+| [Watch the landscape tour](https://theatr.us/gallery/detail/astrobin/iris-nebula/288w86) | [Watch the portrait tour](https://theatr.us/gallery/detail/astrobin/big-q/29k8tr) |
+
+Images and videos by [Yann Ramin (theatrus)](https://theatr.us/), from the
+[AstroBin gallery collection](https://theatr.us/gallery/astrobin). Also watch the
+[hosted tour on seiza.fyi](https://seiza.fyi/)
+([direct MP4](https://seiza.fyi/media/parallax-tour.mp4)). The gallery examples
+are HEVC; playback depends on your browser's codec support.
+
+### Make your own
+
+Open an image and choose **Parallax video…** from the toolbar's More options
+menu. Import aligned starless and unscreened-stars layers, or optionally use a
+separately installed RC-Astro CLI (`rc-astro.exe`) licensed for StarXTerminator.
+Manual-layer solving uses the selected stars even when the viewer contains
+the starless image.
+
+- Generate a multi-stop tour or pick destinations directly on the image. Edit
+  travel, holds, zoom, pan and roll; save and load portable tour itinerary JSON.
+- Preview, play and scrub your camera move. Tune star and background depth,
+  use offline distance catalogs, and add object labels, titles and a credit.
+- Choose a custom dust-opacity map, reload it after editing, reset to counted
+  dust, or export a 16-bit PNG/TIFF or float FITS/XISF map. Camera edits are
+  preserved when changing dust.
+- Export silent MP4 in landscape or portrait, with presets up to 4K and native
+  H.264 or HEVC encoding. HEVC requires an available Windows encoder.
+- Keep your source images untouched. The independent workspace retains a
+  private snapshot after the viewer closes, and a cancelled export preserves
+  an existing movie.
+
+![Native Windows camera controls with automatic tour generation, editable stops and a timeline preview](docs/images/parallax-tour-camera.jpg)
+
+Current `main` builds also offer **Automatic depth planes**: catalogued nebulae
+at different distances and foreground dust clouds move on planes of their own.
+Inspect the detected planes and give a catalogued object a distance of your
+own. These controls are newer than the downloadable 0.8.1 release.
+
+See the [Windows parallax guide](docs/PARALLAX-VIDEO.md) for layer requirements,
+camera and tour controls, encoder availability and export limits. Current
+`main` builds use published Seiza 0.30.1, stacking 0.32.0, parallax 0.7.0 and
+image-io 0.5.0 crates, without vendored patches.
+
+## Image viewing and folder review
+
+Open FITS, XISF, PNG, JPEG, and TIFF images, folders, or dropped files. Browse
+naturally sorted image sets in a cached thumbnail rail without blocking the UI.
+Fit, pan, wheel-zoom, and pointer-anchored pinch-zoom a GPU-backed viewport;
+overlay geometry and labels stay registered to image pixels.
+
+Work in multiple independent document windows. Reopening an already-open file
+focuses its window, while additional file activations stay in the same Seiza
+process and open a new document window. Inspect image statistics, input/display
+RGB histograms, searchable source headers, and processing provenance.
+
+![Image thumbnails displayed in the directory sidebar](docs/images/directory-thumbnails.jpg)
 
 ## Seiza for Windows 0.8.1: shared-reference stacking and dust maps
 
@@ -27,41 +112,12 @@ core.
   map. Camera edits are preserved when changing dust; cancelled or failed
   exports leave existing files and source images untouched.
 
-This version uses published Seiza 0.30.0, stacking 0.32.0, parallax 0.7.0 and
-image-io 0.4.0 crates, without vendored patches. See the
+The 0.8.1 release shipped with published Seiza 0.27.0, stacking 0.29.0,
+parallax 0.4.0 and image-io 0.2.0 crates, without vendored patches. See the
 [shared-reference guide](docs/STACKING-UPSTREAM.md) and
 [parallax guide](docs/PARALLAX-VIDEO.md).
 
 ![Shared-reference controls in the native Windows stacking dialog](docs/images/stacking-shared-reference.jpg)
-
-## Parallax video introduced in 0.8.0
-
-The native Windows parallax editor follows [seiza-mac #56](https://github.com/theatrus/seiza-mac/pull/56):
-fly-in camera moves, generated and editable tours, depth-aware labels, offline
-distances, and silent H.264/HEVC MP4 export. Open an image, then choose
-**Parallax video…** from the toolbar’s More options menu. See the
-[Windows parallax guide](docs/PARALLAX-VIDEO.md) for layer requirements, controls,
-encoder availability, and safety details.
-
-- Import aligned starless and unscreened-stars layers, or use a separately
-  installed RC-Astro CLI (`rc-astro.exe`) licensed for StarXTerminator.
-  Manual-layer solving uses the selected stars even when the viewer contains
-  the starless image.
-- Pick destinations on the image, preview camera moves, generate and edit
-  multi-stop tours, and save portable tour itinerary JSON.
-- Configure star/background depth, offline distance catalogs, labels, output
-  size and frame rate.
-- Turn on **Automatic depth planes** to move catalogued nebulae, and clouds of
-  dust in front of the nebula, on planes at their own distances. The editor
-  lists each plane found, and a catalogued object can take a distance you give. Export through Windows Media Foundation; encoder
-  availability depends on your machine.
-- Parallax windows keep their private source snapshot and remain usable after
-  the original viewer closes. Export cancellation preserves existing files.
-
-Version 0.8.0 shipped with published Seiza 0.25.1, stacking 0.27.0 and parallax
-0.2.1 crates, without vendored patches.
-
-![Native parallax workspace with aligned manual layers, solved coordinates and offline stellar distances](docs/images/parallax-video.jpg)
 
 ## Seiza for Windows 0.7.6
 
@@ -73,8 +129,6 @@ Existing cached thumbnails work after updating; you do not need to clear the
 cache. Source images, thumbnail stretch settings, processing defaults, and
 stacking behavior are unchanged. This release retains Seiza 0.19.0 and stacking
 0.20.0.
-
-![Image thumbnails displayed in the directory sidebar](docs/images/directory-thumbnails.jpg)
 
 ## Stacking controls introduced in 0.7.5
 
@@ -277,26 +331,8 @@ Other preview highlights still apply:
 - Native catalog download, verification, repair, and relocation UI.
 - A self-contained, all-users MSI with FITS and XISF Windows file associations.
 
-## What it can do
+## Stretch and image processing
 
-- Open FITS, XISF, PNG, JPEG, and TIFF images, folders, or dropped files; browse
-  naturally sorted image sets in a cached thumbnail rail without blocking the UI.
-- See autostretched FITS and XISF content thumbnails directly in Windows File
-  Explorer after installing Seiza, and select a file to inspect the stretched
-  image in Explorer's Preview Pane without opening the app.
-- Work in multiple independent document windows. Reopening an already-open
-  file focuses its window, while additional file activations stay in the same
-  Seiza process and open a new document window.
-- Register and stack selected FITS or XISF frames from an opened folder, with
-  optional per-filter outputs, existing or automatically built calibration
-  masters, normalization, pixel rejection, reference selection, SNR analysis,
-  progress, and cancellation.
-- Watch a capture folder for stable FITS/XISF lights, inspect a bounded live
-  preview and depth curve, save snapshots, and pause or resume the exact stack
-  from crash-safe checkpoints.
-- Fit, pan, wheel-zoom, and pointer-anchored pinch-zoom a GPU-backed
-  high-resolution viewport. Overlay geometry and labels stay registered to image
-  pixels while line weights remain readable.
 - Stretch FITS and XISF data with Auto MTF, GHS, Percentile Asinh, Linear, Asinh,
   explicit MTF, or no stretch; stack and reorder stages with live previews,
   undo, and redo.
@@ -306,31 +342,46 @@ Other preview highlights still apply:
   opt-in during automatic selection.
 - Process linear astronomy data with three color strategies and conservative
   Richardson-Lucy deconvolution.
-- Inspect image statistics, input/display RGB histograms, searchable source
-  headers, processing provenance, and plate-solution quality.
-- Analyze FITS and XISF source pixels before display stretch to measure star
-  HFR/FWHM, inspect a nine-region sensor summary, and compare optional
-  parallelogram and triangle tilt diagrams without solving the image.
+- Copy and paste a versioned set of Seiza processing adjustments through the
+  Windows clipboard.
+
+![Modeless astronomy-image processing controls with background correction and deconvolution](docs/images/astronomy-processing.jpg)
+
+## Plate solving and sky overlays
+
 - Blind-solve locally using downloaded catalogs, then draw a WCS grid, field
   center, named and field stars, deep-sky catalog objects and contours,
   transients, and solar-system motion overlays when their catalogs are present.
 - Start solving from either the toolbar or the inspector, and export a solved
   TAN/TAN-SIP header as a standards-compatible FITS `.wcs` file.
+- Inspect plate-solution quality alongside the image statistics and histograms.
+
+![A solved NGC 7000 FITS image with WCS grid, catalog overlays, solution summary, and histogram inspector](docs/images/solved-overlays.png)
+
+## Catalogs and distance data
+
+Download, verify, repair, and relocate Seiza catalogs from the native Settings
+window. The recommended preset includes deep-sky objects, transients, and
+solar-system bodies as well as solving data.
+
+For parallax video, **Download Offline Distances** installs stellar distances,
+object distances, and the object catalog. Solving catalogs are a separate
+requirement; installing distances does not replace them. Online stellar-distance
+lookup is optional. See the [offline distance guide](docs/PARALLAX-VIDEO.md#offline-distances).
+
+![Catalog status, location, and installation controls](docs/images/catalog-settings.png)
+
+## Image export and Explorer integration
+
 - Export the full-resolution stretched image as PNG, JPEG, or TIFF, either
   clean or composited with the currently visible overlays. FITS and XISF can
   be written as true 16-bit-per-channel PNG or TIFF without passing through the
   8-bit display bitmap.
-- Copy and paste rendered images or a versioned set of Seiza processing
-  adjustments through the Windows clipboard.
-- Download, verify, repair, and relocate Seiza catalogs from the native
-  Settings window. The recommended preset includes deep-sky objects,
-  transients, and solar-system bodies as well as solving data.
-- Check the signed Sparkle feed automatically or on demand, then download,
-  verify, and open an in-place MSI update without visiting the Releases page.
-
-| Astronomy processing | Catalog management |
-| --- | --- |
-| ![Modeless astronomy-image processing controls with background correction and deconvolution](docs/images/astronomy-processing.jpg) | ![Catalog status, location, and installation controls](docs/images/catalog-settings.png) |
+- Copy and paste rendered images through the Windows clipboard.
+- See autostretched FITS and XISF content thumbnails directly in Windows File
+  Explorer after installing Seiza, and select a file to inspect the stretched
+  image in Explorer's Preview Pane without opening the app. Read about the
+  [native Explorer providers](#native-explorer-previews-and-thumbnails).
 
 The maintained [feature-parity matrix](docs/FEATURE_PARITY.md) records the
 remaining macOS and Windows integration work.
@@ -354,6 +405,10 @@ System requirements are Windows 11 24H2 or newer on an x64 computer. The MSI
 and bundled first-party binaries are Authenticode signed by StackFoundry LLC.
 The in-app updater also uses independent Ed25519 signatures to verify its feed
 and MSI download.
+
+Check for signed updates automatically or on demand from **More > Check for
+updates** or **Settings > Check now**, then download, verify, and open an
+in-place MSI update without visiting the Releases page.
 
 ## Open FITS and XISF in Photoshop
 
