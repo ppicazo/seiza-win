@@ -138,7 +138,14 @@ requires preparing the scene again. A tour stop normally centres on the plane
 under its point; **Set target plane distance** overrides that camera target
 depth without moving the scene's planes. Itineraries preserve explicit stop
 depths (`depthParsecs`), but do not record scene masks or object-distance overrides.
-Scene-aware editable tour generation is a separate Seiza 0.30.1 adoption.
+Seiza 0.30.1 supplies the prepared-scene planner used below.
+
+Once a scene is prepared, generating a tour plans it on that scene, for the
+full output size: each stop keeps the depth of the plane the scene shows its
+target on, and no image is solved. Applying such a tour leaves the distance
+reference alone, so the scene is not prepared again. Before a scene is
+prepared, a tour is planned from the catalogue alone, and applying it moves the
+distance reference to its chief target. Moving a stop's point drops its depth.
 
 Behind a lifted plane the image keeps only a smooth fill. Where a tour stop
 would show much of it, the fit flies that stop less far and zooms in to keep
@@ -238,6 +245,14 @@ MOV/MKV use the same completed-file publication policy; PNG stages a unique
 sibling directory. All formats check source images, layer files, artwork, plane
 masks and selected encoder executables for direct or file-identity aliases
 before encoding and again before publication.
+Inputs selected earlier in the same window remain protected after replacing a
+map, artwork or mask and preparing a new scene; export to a different filename.
+
+Windows Media Foundation can report an MKV's frame rate as half its actual
+rate. Validation therefore checks Matroska's `DefaultDuration`, independently
+decoded frame timestamps/count/duration, and timed Windows-decoded pixels;
+it does not rely on that Windows metadata field. The generated files retain
+the selected frame rate. MOV/MP4 metadata does not show this discrepancy.
 
 ## Validation
 

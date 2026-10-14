@@ -25,3 +25,25 @@ internal static class ParallaxInputPaths
         .Select(path => LiveStackPath.NormalizeForComparison(path!))
         .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 }
+
+// Replacing a selected map/artwork or preparing a new scene must not make an
+// original input safe to overwrite later in the same document's lifetime.
+internal sealed class ParallaxInputHistory
+{
+    private readonly HashSet<string> _paths = new(StringComparer.OrdinalIgnoreCase);
+    internal IEnumerable<string> Paths => _paths;
+
+    internal void Remember(IEnumerable<string?> paths)
+    {
+        foreach (string? path in paths)
+        {
+            if (string.IsNullOrWhiteSpace(path)) continue;
+            try { _paths.Add(LiveStackPath.NormalizeForComparison(path)); }
+            catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                // Invalid draft paths remain editable. They cannot be opened
+                // as native inputs and preparation will report their errors.
+            }
+        }
+    }
+}

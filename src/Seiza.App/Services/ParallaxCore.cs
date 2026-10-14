@@ -12,6 +12,9 @@ internal static class ParallaxCore
     public static Task<ParallaxTourPlan> PlanAsync(ParallaxRequest request, IProgress<ParallaxEvent>? events = null, CancellationToken cancellationToken = default) =>
         Task.Run(() => Plan(request, events, cancellationToken), cancellationToken);
 
+    public static Task<ParallaxTourPlan> PlanOnSceneAsync(ParallaxVideo scene, string size, ParallaxTourOptions options, CancellationToken cancellationToken = default) =>
+        Task.Run(() => PlanOnScene(scene, size, options, cancellationToken), cancellationToken);
+
     public static Task<ParallaxVideo> PrepareAsync(ParallaxRequest request, IProgress<ParallaxEvent>? events = null, CancellationToken cancellationToken = default) =>
         Task.Run(() => Prepare(request, events, cancellationToken), cancellationToken);
 
@@ -33,6 +36,24 @@ internal static class ParallaxCore
         scope.Check();
         if (json is null) throw failure ?? new SeizaCoreException("Could not plan a parallax tour.");
         return ParallaxTourPlan.FromJson(json);
+    }
+
+    // A tour of the catalogued objects planned on a prepared scene, for a
+    // `size` frame ("WIDTHxHEIGHT"): each stop is framed at the depth the scene
+    // shows its target at, and no image is solved. The scene keeps the distance
+    // it was prepared with, so the plan's focus matters only to a new preparation.
+    public static ParallaxTourPlan PlanOnScene(ParallaxVideo scene, string size, ParallaxTourOptions options, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scene); ArgumentNullException.ThrowIfNull(options);
+        cancellationToken.ThrowIfCancellationRequested();
+        nint result = NativeMethods.PlanParallaxSceneTourJson(scene.Handle, ParallaxJson.SerializeSceneTourSettings(size, options), out nint error);
+        string? json = result == 0 ? null : NativeString.TakeOwned(result, string.Empty);
+        Exception? failure = error == 0 ? null : NativeString.TakeError(error, "Could not plan a tour on the prepared scene.");
+        if (json is null) throw failure ?? new SeizaCoreException("Could not plan a tour on the prepared scene.");
+        cancellationToken.ThrowIfCancellationRequested();
+        ParallaxTourPlan plan = ParallaxTourPlan.FromJson(json);
+        plan.PlannedOnScene = true;
+        return plan;
     }
 
     public static unsafe ParallaxVideo Prepare(ParallaxRequest request, IProgress<ParallaxEvent>? events = null, CancellationToken cancellationToken = default)

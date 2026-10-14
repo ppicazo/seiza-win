@@ -9,7 +9,7 @@ namespace Seiza.App.Windows.Tests;
 public sealed class ParallaxDustMapSnapshotTests
 {
     [Fact]
-    public async Task PaintedSnapshotRetainsSixteenBitGrayPrecisionAndDoesNotMutateTheDraft()
+    public async Task PaintedSnapshotRetainsSixteenBitOpacityInOpaqueRgbAndDoesNotMutateTheDraft()
     {
         using var files = new Scratch();
         const int width = 9, height = 7;
@@ -22,13 +22,19 @@ public sealed class ParallaxDustMapSnapshotTests
         BitmapDecoder decoder = await BitmapDecoder.CreateAsync(stream);
         Assert.Equal((uint)width, decoder.PixelWidth);
         Assert.Equal((uint)height, decoder.PixelHeight);
-        byte[] decoded = (await decoder.GetPixelDataAsync(BitmapPixelFormat.Gray16, BitmapAlphaMode.Ignore,
+        byte[] decoded = (await decoder.GetPixelDataAsync(BitmapPixelFormat.Rgba16, BitmapAlphaMode.Straight,
             new BitmapTransform(), ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage)).DetachPixelData();
-        Assert.Equal(opacity.Length * 2, decoded.Length);
+        Assert.Equal(opacity.Length * 8, decoded.Length);
         for (int index = 0; index < opacity.Length; index++)
         {
-            ushort actual = BinaryPrimitives.ReadUInt16LittleEndian(decoded.AsSpan(index * 2, 2));
-            Assert.InRange(Math.Abs(actual / (double)ushort.MaxValue - opacity[index]), 0, 1.0 / ushort.MaxValue);
+            ushort expected = (ushort)Math.Round(opacity[index] * ushort.MaxValue);
+            for (int channel = 0; channel < 3; channel++)
+            {
+                ushort actual = BinaryPrimitives.ReadUInt16LittleEndian(decoded.AsSpan(index * 8 + channel * 2, 2));
+                Assert.Equal(expected, actual);
+                Assert.InRange(Math.Abs(actual / (double)ushort.MaxValue - opacity[index]), 0, 1.0 / ushort.MaxValue);
+            }
+            Assert.Equal(ushort.MaxValue, BinaryPrimitives.ReadUInt16LittleEndian(decoded.AsSpan(index * 8 + 6, 2)));
         }
         Assert.Equal(original, opacity);
     }

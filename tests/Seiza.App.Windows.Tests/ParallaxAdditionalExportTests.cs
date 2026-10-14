@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using Seiza.App.Models;
 using Seiza.App.Services;
 using Windows.Graphics.Imaging;
@@ -250,7 +252,31 @@ public sealed class ParallaxAdditionalExportTests(ITestOutputHelper output)
                 output.WriteLine($"Windows {format} frame near {index}/24s: green={timedPixels[top + 1]}, expected~{20 + index * 12}");
                 Assert.InRange(timedPixels[top + 1], 20 + index * 12 - 18, 20 + index * 12 + 18);
             }
-            Assert.Equal(24.0, (double)encoding.FrameRate.Numerator / encoding.FrameRate.Denominator, 4);
+            if (format == ParallaxExportFormat.Mov)
+                Assert.Equal(24.0, (double)encoding.FrameRate.Numerator / encoding.FrameRate.Denominator, 4);
+            else
+            {
+                // Windows MF reports about half the actual MKV rate on this
+                // reader, even with no B frames and explicit CFR. Verify the
+                // container's nanoseconds/frame and independently decode every
+                // timestamp rather than treating that metadata as authoritative.
+                ulong duration = MatroskaDefaultDuration(await File.ReadAllBytesAsync(destination));
+                Assert.InRange(duration, 41_666_665ul, 41_666_667ul);
+                output.WriteLine($"Matroska DefaultDuration={duration}ns (~24fps); Windows MF reported FPS is not used for MKV timing validation.");
+            }
+            string inspection = await InspectWithFfmpegAsync(executable, destination);
+            MatchCollection frames = Regex.Matches(inspection, @"\bn:\s*(\d+)\s+pts:\s*(-?\d+)\s+pts_time:\s*([-0-9.]+)", RegexOptions.CultureInvariant);
+            Assert.Equal(source.FrameCount, frames.Count);
+            for (int index = 0; index < frames.Count; index++)
+            {
+                Assert.Equal(index, int.Parse(frames[index].Groups[1].Value, CultureInfo.InvariantCulture));
+                double timestamp = double.Parse(frames[index].Groups[3].Value, CultureInfo.InvariantCulture);
+                Assert.InRange(timestamp, index / 24.0 - 0.001, index / 24.0 + 0.001);
+            }
+            Assert.Contains("frame_rate: 24/1", inspection, StringComparison.Ordinal);
+            Assert.Contains("color_primaries:bt709 color_trc:iec61966-2-1", inspection, StringComparison.Ordinal);
+            if (Environment.GetEnvironmentVariable("SEIZA_PARALLAX_EXPORT_DIAGNOSTICS") is string inspectionDirectory && !string.IsNullOrWhiteSpace(inspectionDirectory))
+                await File.WriteAllTextAsync(Path.Combine(Path.GetFullPath(inspectionDirectory), Path.GetFileName(destination) + ".ffmpeg-inspection.txt"), inspection);
             Assert.Equal(Enumerable.Range(0, source.FrameCount), source.Rendered);
             Assert.All(reports, report => Assert.Equal(1, report.AllocatedBuffers));
             output.WriteLine($"FFmpeg {format}: {encoding.Width}x{encoding.Height}, {clip.OriginalDuration.TotalSeconds:F3}s, H.264, silent.");
@@ -275,6 +301,51 @@ public sealed class ParallaxAdditionalExportTests(ITestOutputHelper output)
         Assert.Equal("previous failed destination", await File.ReadAllTextAsync(failed));
         Assert.Subset(existing, ProcessIds(processName));
         AssertNoStaging(directory);
+    }
+
+    private static async Task<string> InspectWithFfmpegAsync(string executable, string path)
+    {
+        using var process = new Process
+        {
+            StartInfo = ParallaxVideoExporter.FfmpegStartInfo(executable,
+                ["-hide_banner", "-nostdin", "-i", "file:" + path, "-map", "0:v:0", "-vf", "showinfo", "-f", "null", "-"]),
+        };
+        Assert.True(process.Start());
+        process.StandardInput.Close();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        Task<string> errors = process.StandardError.ReadToEndAsync(timeout.Token);
+        Task<string> standardOutput = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+            string details = await errors;
+            await standardOutput;
+            Assert.Equal(0, process.ExitCode);
+            return details;
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync(CancellationToken.None);
+        }
+    }
+
+    private static ulong MatroskaDefaultDuration(byte[] bytes)
+    {
+        // DefaultDuration (0x23E383) is nanoseconds per frame. Its first
+        // occurrence in these generated single-track fixtures is TrackEntry.
+        int offset = bytes.AsSpan().IndexOf(new byte[] { 0x23, 0xE3, 0x83 });
+        Assert.True(offset >= 0, "Matroska track has no DefaultDuration.");
+        offset += 3;
+        int marker = 0x80, length = 1;
+        while ((bytes[offset] & marker) == 0) { marker >>= 1; length++; Assert.InRange(length, 1, 8); }
+        ulong size = (uint)(bytes[offset] & (marker - 1));
+        for (int index = 1; index < length; index++) size = (size << 8) | bytes[offset + index];
+        Assert.InRange(size, 1ul, 8ul);
+        offset += length;
+        ulong duration = 0;
+        for (ulong index = 0; index < size; index++) duration = (duration << 8) | bytes[offset + checked((int)index)];
+        return duration;
     }
 
     [FfmpegFact]

@@ -15,9 +15,16 @@ internal static class ParallaxDustMapSnapshot
             opacity.Any(value => !float.IsFinite(value) || value is < 0 or > 1))
             throw new ArgumentException("The painted dust map needs finite opacity between zero and one, at most 768 pixels per side.", nameof(opacity));
         cancellationToken.ThrowIfCancellationRequested();
-        byte[] pixels = new byte[checked(opacity.Length * 2)];
+        // WinRT's PNG encoder accepts Rgba16 but not Gray16 input. Equal RGB
+        // channels and opaque alpha retain a grayscale map's full precision.
+        byte[] pixels = new byte[checked(opacity.Length * 8)];
         for (int i = 0; i < opacity.Length; i++)
-            BinaryPrimitives.WriteUInt16LittleEndian(pixels.AsSpan(i * 2, 2), (ushort)Math.Round(opacity[i] * ushort.MaxValue));
+        {
+            ushort value = (ushort)Math.Round(opacity[i] * ushort.MaxValue);
+            for (int channel = 0; channel < 3; channel++)
+                BinaryPrimitives.WriteUInt16LittleEndian(pixels.AsSpan(i * 8 + channel * 2, 2), value);
+            BinaryPrimitives.WriteUInt16LittleEndian(pixels.AsSpan(i * 8 + 6, 2), ushort.MaxValue);
+        }
         bool created = false;
         try
         {
@@ -25,7 +32,7 @@ internal static class ParallaxDustMapSnapshot
             created = true;
             using var stream = output.AsRandomAccessStream();
             BitmapEncoder encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
-            encoder.SetPixelData(BitmapPixelFormat.Gray16, BitmapAlphaMode.Ignore,
+            encoder.SetPixelData(BitmapPixelFormat.Rgba16, BitmapAlphaMode.Straight,
                 (uint)width, (uint)height, 96, 96, pixels);
             await encoder.FlushAsync();
             cancellationToken.ThrowIfCancellationRequested();

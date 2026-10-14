@@ -182,6 +182,8 @@ public sealed class ParallaxModelTests
         Assert.Empty(older.Planes);
     }
 
+    private const string PlannedJson = """{"schemaVersion":1,"focus":[100,80],"focusName":"Target","seconds":7,"tour":[{"name":"Whole Image","travel":0,"hold":1},{"name":"Sh2-170","focus":[90,70],"dolly":0.88,"zoom":3.2,"pan":0.12,"travel":5,"hold":2,"title":"Sh2-170","depthParsecs":2790}]}""";
+
     [Fact]
     public void APlannedStopOnADepthPlanePreservesItsExplicitDepth()
     {
@@ -193,6 +195,78 @@ public sealed class ParallaxModelTests
         Assert.Equal(2790, plan.Tour[1].DepthParsecs);
         using var saved = JsonDocument.Parse(plan.ToJson());
         Assert.Equal(2790, saved.RootElement.GetProperty("tour")[1].GetProperty("depthParsecs").GetDouble());
+    }
+
+    [Fact]
+    public void ACatalogueTourMovesTheDistanceReferenceAndDropsItsStopsDepths()
+    {
+        // Planned from the catalogue alone, a stop's depth may name a plane the
+        // scene never lifts: applied, the stop centres on whatever plane the
+        // scene shows at its point, and the scene's distance is taken at the
+        // plan's focus.
+        ParallaxTourPlan plan = ParallaxTourPlan.FromJson(PlannedJson);
+        Assert.False(plan.PlannedOnScene);
+        var composition = new ParallaxComposition();
+        composition.Scene.DistanceFocus = [10, 20]; composition.DistanceName = "Mine";
+        composition.ApplyTour(plan);
+        Assert.Equal(ParallaxMotion.Tour, composition.Motion);
+        Assert.Equal(0.12, composition.Stops[1].Pan);
+        Assert.Null(composition.Stops[1].DepthParsecs);
+        Assert.Equal(new double[] { 100, 80 }, composition.Scene.DistanceFocus);
+        Assert.Equal("Target", composition.DistanceName);
+        using var sent = JsonDocument.Parse(composition.VideoSettings(false).ToJson());
+        Assert.False(sent.RootElement.GetProperty("tour")[1].TryGetProperty("depthParsecs", out _));
+    }
+
+    [Fact]
+    public void ATourPlannedOnTheSceneKeepsItsDistanceReferenceAndDepths()
+    {
+        // The prepared scene keeps the distance it was prepared with; moving
+        // the reference to the plan's focus would throw that scene away.
+        ParallaxTourPlan plan = ParallaxTourPlan.FromJson(PlannedJson);
+        plan.PlannedOnScene = true;
+        var composition = new ParallaxComposition();
+        composition.Scene.DistanceFocus = [10, 20]; composition.DistanceName = "Mine";
+        ParallaxSceneSettings scene = composition.Scene.DeepClone();
+        composition.ApplyTour(plan);
+        Assert.True(composition.Scene.ContentEquals(scene));
+        Assert.Equal("Mine", composition.DistanceName);
+        Assert.Equal(2790, composition.Stops[1].DepthParsecs);
+        Assert.Null(composition.ValidationMessage);
+        using var sent = JsonDocument.Parse(composition.VideoSettings(false).ToJson());
+        Assert.Equal(2790, sent.RootElement.GetProperty("tour")[1].GetProperty("depthParsecs").GetDouble());
+        // The plan itself is left as it came.
+        Assert.Equal(2790, plan.Tour[1].DepthParsecs);
+        composition.Stops[1].DepthParsecs = -1;
+        Assert.NotNull(composition.ValidationMessage);
+    }
+
+    [Fact]
+    public void PlanningOnTheSceneSendsTheFrameAndTheTourOptions()
+    {
+        Assert.Equal("""{"size":"1920x1080","autoTour":{"targets":4,"hold":2,"motion":0.5}}""",
+            ParallaxJson.SerializeSceneTourSettings("1920x1080", new() { Targets = 4, Hold = 2, Motion = 0.5 }));
+        // No count plans every target worth a visit.
+        Assert.Equal("""{"size":"1080x1920","autoTour":{"hold":1.5,"motion":1}}""",
+            ParallaxJson.SerializeSceneTourSettings("1080x1920", new() { Targets = null }));
+        // The session asks for the full output frame, not the preview's.
+        Assert.Equal("3840x2160", new ParallaxComposition { Width = 3840, Height = 2160 }.VideoSettings(false).Size);
+    }
+
+    [Fact]
+    public void ApplyingAFileItineraryKeepsItsAuthoredDepthsAndMovesTheDistanceReference()
+    {
+        ParallaxTourPlan plan = ParallaxTourPlan.FromJson(PlannedJson, Path.Combine(Path.GetTempPath(), "tour.json"));
+        Assert.False(plan.PlannedOnScene);
+        Assert.True(plan.PreserveStopDepths);
+        var composition = new ParallaxComposition();
+        composition.ApplyTour(plan);
+        Assert.Equal(2790, composition.Stops[1].DepthParsecs);
+        Assert.Equal(plan.Focus, composition.Scene.DistanceFocus);
+        Assert.Equal("Target", composition.DistanceName);
+        using var saved = JsonDocument.Parse(plan.ToJson());
+        Assert.False(saved.RootElement.TryGetProperty("preserveStopDepths", out _));
+        Assert.False(saved.RootElement.TryGetProperty("plannedOnScene", out _));
     }
 
     [Fact]

@@ -24,7 +24,8 @@ public sealed record ParallaxStop
     // titles are shown: a title card with its transparency kept.
     public string? Card { get; set; }
     // Null centres the stop on the plane currently under its focus. A given
-    // depth preserves the framing of imported/planned itineraries in parsecs.
+    // depth preserves imported/planned framing in parsecs; moving the point
+    // drops it so the new point uses its own plane unless explicitly overridden.
     public double? DepthParsecs { get; set; }
     [JsonIgnore] public string DisplayName => Name ?? (Focus is null ? "Whole Image" : "Custom Point");
     public ParallaxStop DeepClone() => this with { Focus = Focus?.ToArray() };
@@ -48,6 +49,12 @@ public sealed record ParallaxTourPlan
     public double? TourGlide { get; set; }
     public bool? TourTitles { get; set; }
     public bool? TourLoop { get; set; }
+    // Planned on the prepared scene, whose depths its stops carry, rather than
+    // from the catalogue alone.
+    [JsonIgnore] public bool PlannedOnScene { get; set; }
+    // File itineraries may explicitly author a target depth even when they
+    // were not generated on this currently prepared scene.
+    [JsonIgnore] public bool PreserveStopDepths { get; set; }
     public string ToJson() => ParallaxJson.SerializePlan(this);
     public static ParallaxTourPlan FromJson(string json) => ParallaxJson.DeserializePlan(json);
 
@@ -56,7 +63,8 @@ public sealed record ParallaxTourPlan
     public static ParallaxTourPlan FromJson(string json, string itineraryPath)
     {
         string folder = ItineraryFolder(itineraryPath);
-        return FromJson(json).WithCardPaths(card => Path.IsPathFullyQualified(card) ? card : Path.GetFullPath(card, folder));
+        return FromJson(json).WithCardPaths(card => Path.IsPathFullyQualified(card) ? card : Path.GetFullPath(card, folder))
+            with { PreserveStopDepths = true };
     }
 
     public string ToJson(string itineraryPath)
@@ -311,6 +319,24 @@ public sealed record ParallaxComposition
 
     public double ArrivalAt(int index) => index < 0 || index >= Stops.Count ? 0 :
         Stops.Take(index).Sum(stop => stop.Hold) + Stops.Take(index + 1).Skip(1).Sum(stop => stop.Travel);
+
+    // Replace the draft's tour with `plan`. A tour planned from the catalogue
+    // alone also moves the distance reference to its focus, the target most
+    // worth a visit, and its stops centre on the planes the scene shows at
+    // their points. One planned on the prepared scene keeps the scene's
+    // distance reference, as moving it would prepare the scene again, and its
+    // stops keep the depths the scene gave them.
+    public void ApplyTour(ParallaxTourPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        Motion = ParallaxMotion.Tour;
+        Stops = plan.Tour.Select(stop => stop.DeepClone() with
+        {
+            DepthParsecs = plan.PlannedOnScene || plan.PreserveStopDepths ? stop.DepthParsecs : null,
+        }).ToList();
+        if (!plan.PlannedOnScene) { Scene.DistanceFocus = plan.Focus.ToArray(); DistanceName = plan.FocusName; }
+        TourGlide = plan.TourGlide ?? TourGlide; TourTitles = plan.TourTitles ?? TourTitles; TourLoop = plan.TourLoop ?? TourLoop;
+    }
 
     public void SetSpin(int index, bool clockwise)
     {

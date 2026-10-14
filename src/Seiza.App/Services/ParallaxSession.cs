@@ -19,6 +19,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     private readonly DispatcherQueue _dispatcher;
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "Seiza-Parallax-" + Guid.NewGuid().ToString("N"));
     private readonly Dictionary<ParallaxInputFile, string> _inputs = [];
+    private readonly ParallaxInputHistory _protectedInputHistory = new();
     private readonly List<ParallaxComposition> _undo = [], _redo = [];
     private readonly List<string> _warnings = [], _notes = [];
     private WcsResult? _wcs;
@@ -88,6 +89,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public ParallaxSession(string sourcePath, FitsImageProcessingConfiguration processing, WcsResult? wcs, DispatcherQueue dispatcher)
     {
         _sourcePath = sourcePath; _processing = processing; _wcs = wcs; _dispatcher = dispatcher;
+        _protectedInputHistory.Remember([sourcePath]);
         CatalogSettingsStore.CatalogDirectoryChanged += CatalogDirectoryChanged;
         _catalogs.PropertyChanged += CatalogChanged;
     }
@@ -135,6 +137,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         if (previous.ContentEquals(updated)) return;
         _undo.Add(previous); if (_undo.Count > 100) _undo.RemoveAt(0);
         _redo.Clear(); Composition = updated;
+        _protectedInputHistory.Remember(ParallaxInputPaths.FromComposition(updated));
         Invalidate(!previous.Scene.ContentEquals(updated.Scene));
         if (previous.Scene.GaiaMaxMagnitude != updated.Scene.GaiaMaxMagnitude) _ = RefreshCatalogStatusAsync();
     }
@@ -145,6 +148,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     {
         if (IsBusy || from.Count == 0) return;
         var previous = Composition; to.Add(previous); Composition = from[^1]; from.RemoveAt(from.Count - 1);
+        _protectedInputHistory.Remember(ParallaxInputPaths.FromComposition(Composition));
         Invalidate(!previous.Scene.ContentEquals(Composition.Scene));
         if (previous.Scene.GaiaMaxMagnitude != Composition.Scene.GaiaMaxMagnitude) _ = RefreshCatalogStatusAsync();
     }
@@ -184,6 +188,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
             if (_closed) return;
             if (starless) { _starless = copy; _starlessSourcePath = Path.GetFullPath(path); StarlessName = Path.GetFileName(path); }
             else { _stars = copy; _starsSourcePath = Path.GetFullPath(path); StarsName = Path.GetFileName(path); }
+            _protectedInputHistory.Remember([path]);
             _layersAligned = false; Invalidate(true);
             Status = "Confirm that both layers match the source alignment and stretch.";
         }
@@ -197,6 +202,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         {
             if (!File.Exists(path) && !(kind == ParallaxInputFile.Objects && Directory.Exists(path))) throw new FileNotFoundException("The selected input was not found.", path);
             _inputs[kind] = Path.GetFullPath(path); Invalidate(true);
+            _protectedInputHistory.Remember([path]);
         }
         return Task.CompletedTask;
     }
@@ -226,6 +232,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         if (!File.Exists(path)) throw new FileNotFoundException("The selected dust map was not found.", path);
         if (!Composition.Scene.Dust) { Error = "Turn on dust dimming to use a dust map."; Notify(); return; }
         string full = Path.GetFullPath(path);
+        _protectedInputHistory.Remember([full]);
         if (_scene is null) { _inputs[ParallaxInputFile.DustMap] = full; _paintedDustMapPath = null; Invalidate(true); return; }
         if (await SwapDustAsync(full, "Applying the dust map…")) { _inputs[ParallaxInputFile.DustMap] = full; _paintedDustMapPath = null; }
         Notify();
@@ -280,7 +287,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
             snapshotCreated = true;
         }
         bool applied = await SwapDustAsync(path, "Applying the painted dust map…", PrepareSnapshot);
-        if (applied) { _inputs[ParallaxInputFile.DustMap] = path; _paintedDustMapPath = path; }
+        if (applied) { _inputs[ParallaxInputFile.DustMap] = path; _paintedDustMapPath = path; _protectedInputHistory.Remember([path]); }
         else if (snapshotCreated) File.Delete(path); // Only the newly owned private snapshot, never an input file.
         Notify();
     }
@@ -333,7 +340,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     {
         if (!CanExportDustMap || (_preview ?? _scene) is not { } video) return;
         string?[] protectedPaths = [_sourcePath, _starlessSourcePath, _starsSourcePath, SnapshotPath, _starless, _stars,
-            .. _inputs.Values, .. ParallaxInputPaths.FromComposition(Composition),
+            .. _inputs.Values, .. _protectedInputHistory.Paths, .. ParallaxInputPaths.FromComposition(Composition),
             .. (_scene?.ProtectedPaths ?? []), .. video.ProtectedPaths];
         bool resumeRefit = _preview is null || _refitRequested || IsReconfiguring;
         var (signal, generation) = Begin("Exporting the dust map…");
@@ -387,7 +394,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         if (PickingDistance) { Edit(c => { c.Scene.DistanceFocus = [x, y]; c.DistanceName = "Custom point"; }); PickingDistance = false; }
         else if (PickingDestination)
         {
-            if (Composition.Motion == ParallaxMotion.Tour) EditStop(s => { s.Focus = [x, y]; s.Name = "Custom Point"; });
+            if (Composition.Motion == ParallaxMotion.Tour) EditStop(s => { s.Focus = [x, y]; s.Name = "Custom Point"; s.DepthParsecs = null; });
             else Edit(c => { c.Focus = [x, y]; c.FocusName = "Custom Point"; });
             PickingDestination = false;
         }
@@ -467,6 +474,23 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     {
         if (!SourceReady || IsBusy || _closed || _catalogs.IsRunning) return;
         if (!double.IsFinite(TourOptions.Hold) || TourOptions.Hold < 0 || !double.IsFinite(TourOptions.Motion) || TourOptions.Motion < 0) { Error = "Tour hold and motion must be finite and nonnegative."; Notify(); return; }
+        // A prepared scene plans each stop at the depth it shows its target at,
+        // with no solve, for the full output frame. The scene keeps the
+        // distance it was prepared with.
+        if (_scene is { } scene)
+        {
+            string size = Composition.VideoSettings(false).Size;
+            ParallaxTourOptions options = TourOptions with { };
+            var (sceneSignal, sceneGeneration) = Begin("Planning tour on the prepared scene…");
+            try
+            {
+                var plan = await ParallaxCore.PlanOnSceneAsync(scene, size, options, sceneSignal.Token);
+                if (!_closed && sceneGeneration == _revision) { Candidate = plan; Status = $"Generated {plan.Tour.Count} stops on the prepared scene. Apply the tour or keep your draft."; }
+                Finish(sceneSignal, null);
+            }
+            catch (Exception e) { Finish(sceneSignal, e); }
+            return;
+        }
         ParallaxRequest request;
         try { request = Request(false); } catch (Exception e) { Error = e.Message; Notify(); return; }
         request.AutoTour = TourOptions with { }; request.Video.Tour = [];
@@ -485,12 +509,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public void ApplyCandidate()
     {
         if (Candidate is not { } plan) return;
-        Edit(c =>
-        {
-            c.Motion = ParallaxMotion.Tour; c.Stops = plan.Tour.Select(s => s.DeepClone()).ToList();
-            c.Scene.DistanceFocus = plan.Focus.ToArray(); c.DistanceName = plan.FocusName;
-            c.TourGlide = plan.TourGlide ?? c.TourGlide; c.TourTitles = plan.TourTitles ?? c.TourTitles; c.TourLoop = plan.TourLoop ?? c.TourLoop;
-        });
+        Edit(c => c.ApplyTour(plan));
         SelectedStop = plan.Tour[0].Id; Candidate = null; Notify();
     }
     public void DiscardCandidate() { Candidate = null; Notify(); }
@@ -630,7 +649,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         ParallaxRequest request = Request(false); ParallaxVideo? existing = _scene;
         var options = new ParallaxExportOptions(ExportFormat, Codec, FfmpegPath);
         string?[] protectedPaths = [_sourcePath, _starlessSourcePath, _starsSourcePath, SnapshotPath, _starless, _stars,
-            .. _inputs.Values, .. ParallaxInputPaths.FromComposition(Composition), .. (existing?.ProtectedPaths ?? [])];
+            .. _inputs.Values, .. _protectedInputHistory.Paths, .. ParallaxInputPaths.FromComposition(Composition), .. (existing?.ProtectedPaths ?? [])];
         var (signal, generation) = Begin(existing is null ? "Preparing full-resolution video…" : "Fitting full-resolution video…");
         ParallaxVideo? video = null;
         bool retained = false;

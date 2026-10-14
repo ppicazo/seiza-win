@@ -12,6 +12,11 @@ internal static partial class NativeMethods
     internal static unsafe partial nint PlanParallaxTourJson(string request,
         delegate* unmanaged[Cdecl]<nint, nint, void> events, nint context, out nint error);
 
+    // A tour planned on a prepared scene, each stop at the depth the scene shows
+    // its target at. No solve, events or cancellation. Seiza 0.30.1 and later.
+    [LibraryImport(LibraryName, EntryPoint = "seiza_parallax_plan_scene_tour_json", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint PlanParallaxSceneTourJson(SafeParallaxVideoHandle video, string settings, out nint error);
+
     [LibraryImport(LibraryName, EntryPoint = "seiza_parallax_reconfigure_json", StringMarshalling = StringMarshalling.Utf8)]
     internal static unsafe partial nint ReconfigureParallaxJson(SafeParallaxVideoHandle video, string settings, SafeCancelSignalHandle cancel,
         delegate* unmanaged[Cdecl]<nint, nint, void> events, nint context, out nint error);

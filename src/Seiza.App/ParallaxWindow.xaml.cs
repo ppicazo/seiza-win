@@ -867,7 +867,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
     {
         double[] point = (Composition.Motion == ParallaxMotion.Tour ? SelectedStop()?.Focus : Composition.Focus)?.ToArray() ?? Center();
         point[axis] = value;
-        if (Composition.Motion == ParallaxMotion.Tour) Session.EditStop(stop => { stop.Focus = point; stop.Name = "Custom Point"; });
+        if (Composition.Motion == ParallaxMotion.Tour) Session.EditStop(stop => { stop.Focus = point; stop.Name = "Custom Point"; stop.DepthParsecs = null; });
         else Session.Edit(c => { c.Focus = point; c.FocusName = "Custom Point"; });
     }
 
