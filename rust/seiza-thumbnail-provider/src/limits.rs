@@ -1,5 +1,6 @@
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
+use std::collections::{BTreeMap, HashSet};
 
 const XISF_PREAMBLE_BYTES: usize = 16;
 const MAX_HEADER_BYTES: usize = 16 * 1024 * 1024;
@@ -72,36 +73,70 @@ fn inspect_fits(bytes: &[u8]) -> Result<ImageLayout, String> {
 
     let mut bitpix = None;
     let mut naxis = None;
-    let mut width = None;
-    let mut height = None;
-    let mut third_axis = None;
+    let mut dimensions = BTreeMap::new();
+    let mut structural_keywords = HashSet::new();
     let mut bayer = false;
     let header_limit = bytes.len().min(MAX_HEADER_BYTES);
     let mut found_end = false;
 
     for card in bytes[..header_limit].chunks_exact(80) {
-        let keyword = trim_ascii(&card[..8]);
+        // The decoder trims the end of ordinary keywords, not the start.
+        let mut keyword = std::str::from_utf8(&card[..8])
+            .map_err(|_| "FITS header keyword is not UTF-8")?
+            .trim_end()
+            .as_bytes();
         if keyword == b"END" {
             found_end = true;
             break;
         }
-        if card[8] != b'=' {
-            continue;
-        }
+        let raw_value = if keyword == b"HIERARCH" && card[8] != b'=' {
+            // seiza-fits 0.3 also accepts HIERARCH cards, including names
+            // that affect the image budget. Inspect the same name and value
+            // so an extended card cannot hide an empty or Bayer primary.
+            let extended = &card[8..];
+            let Some(equals) = extended.iter().position(|byte| *byte == b'=') else {
+                continue;
+            };
+            keyword = std::str::from_utf8(&extended[..equals])
+                .map_err(|_| "FITS HIERARCH keyword is not UTF-8")?
+                .trim()
+                .as_bytes();
+            &extended[equals + 1..]
+        } else {
+            if card[8] != b'=' {
+                continue;
+            }
+            &card[9..]
+        };
         let value = trim_ascii(
-            card[10..]
+            raw_value
                 .split(|byte| *byte == b'/')
                 .next()
                 .unwrap_or_default(),
         );
+        let axis = keyword.strip_prefix(b"NAXIS").and_then(|suffix| {
+            // Match the decoder's canonical NAXIS1, NAXIS2, ... keys. A
+            // noncanonical NAXIS01 must not replace NAXIS1 in this estimate.
+            if suffix.first() == Some(&b'0') || !suffix.iter().all(u8::is_ascii_digit) {
+                None
+            } else {
+                parse_i64(suffix)
+            }
+        });
+        if (matches!(keyword, b"BITPIX" | b"NAXIS" | b"BAYERPAT") || axis.is_some())
+            && !structural_keywords.insert(keyword)
+        {
+            return Err("FITS header has duplicate structural cards".into());
+        }
         match keyword {
             b"BITPIX" => bitpix = parse_i64(value),
             b"NAXIS" => naxis = parse_i64(value),
-            b"NAXIS1" => width = parse_positive_u64(value),
-            b"NAXIS2" => height = parse_positive_u64(value),
-            b"NAXIS3" => third_axis = parse_positive_u64(value),
             b"BAYERPAT" => bayer = !value.is_empty(),
-            _ => {}
+            _ => {
+                if let Some(axis) = axis {
+                    dimensions.insert(axis, parse_positive_u64(value));
+                }
+            }
         }
     }
 
@@ -111,20 +146,36 @@ fn inspect_fits(bytes: &[u8]) -> Result<ImageLayout, String> {
     let bitpix = bitpix.ok_or("FITS header is missing BITPIX")?;
     let bytes_per_sample = match bitpix {
         8 => 1,
-        16 => 2,
+        // seiza-fits 0.3 promotes signed or scaled 16-bit samples to f32.
+        // The header alone cannot prove that all unscaled samples are positive.
+        16 => 4,
         32 | -32 => 4,
         -64 => 8,
         _ => return Err(format!("unsupported FITS BITPIX {bitpix}")),
     };
-    let planes = if naxis.unwrap_or_default() >= 3 {
-        third_axis.unwrap_or(1).clamp(1, 3)
+    let naxis = naxis.ok_or("FITS header is missing NAXIS")?;
+    if !(2..=999).contains(&naxis) {
+        return Err(format!("unsupported FITS primary NAXIS {naxis}"));
+    }
+    // seiza-fits 0.3 follows an empty primary HDU to an image extension,
+    // including tile-compressed extensions. Until preflight inspects that
+    // selected extension, reject every empty or incomplete primary shape.
+    for axis in 1..=naxis {
+        if !dimensions.get(&axis).is_some_and(Option::is_some) {
+            return Err(format!(
+                "FITS primary NAXIS{axis} is missing or not positive"
+            ));
+        }
+    }
+    let planes = if naxis >= 3 {
+        dimensions[&3].unwrap().clamp(1, 3)
     } else {
         1
     };
 
     Ok(ImageLayout {
-        width: width.ok_or("FITS header is missing NAXIS1")?,
-        height: height.ok_or("FITS header is missing NAXIS2")?,
+        width: dimensions[&1].unwrap(),
+        height: dimensions[&2].unwrap(),
         planes,
         bytes_per_sample,
         compressed: false,
@@ -163,26 +214,26 @@ fn inspect_xisf(bytes: &[u8]) -> Result<ImageLayout, String> {
             .map_err(|error| format!("invalid XISF XML header: {error}"))?
         {
             Event::Start(element)
-                if element.local_name().as_ref() == b"Image" && layout.is_none() =>
+                if element.local_name().as_ref() == "Image" && layout.is_none() =>
             {
                 layout = Some(xisf_image_layout(&element)?);
                 inside_first_image = true;
             }
             Event::Empty(element)
-                if element.local_name().as_ref() == b"Image" && layout.is_none() =>
+                if element.local_name().as_ref() == "Image" && layout.is_none() =>
             {
                 layout = Some(xisf_image_layout(&element)?);
                 break;
             }
             Event::Start(element) | Event::Empty(element)
-                if inside_first_image && element.local_name().as_ref() == b"ColorFilterArray" =>
+                if inside_first_image && element.local_name().as_ref() == "ColorFilterArray" =>
             {
                 if let Some(layout) = &mut layout {
                     layout.bayer = true;
                 }
             }
             Event::End(element)
-                if inside_first_image && element.local_name().as_ref() == b"Image" =>
+                if inside_first_image && element.local_name().as_ref() == "Image" =>
             {
                 break;
             }
@@ -202,12 +253,13 @@ fn xisf_image_layout(element: &BytesStart<'_>) -> Result<ImageLayout, String> {
     for attribute in element.attributes() {
         let attribute =
             attribute.map_err(|error| format!("invalid XISF image attribute: {error}"))?;
-        let value = std::str::from_utf8(attribute.value.as_ref())
-            .map_err(|_| "XISF image attribute is not UTF-8")?;
+        // quick-xml validates UTF-8 while reading events and exposes names and
+        // raw attribute values as strings starting with 0.42.
+        let value = attribute.value.as_ref();
         match attribute.key.as_ref() {
-            b"geometry" => geometry = Some(value.to_string()),
-            b"sampleFormat" => sample_format = Some(value.to_string()),
-            b"compression" => compressed = true,
+            "geometry" => geometry = Some(value.to_string()),
+            "sampleFormat" => sample_format = Some(value.to_string()),
+            "compression" => compressed = true,
             _ => {}
         }
     }
@@ -274,7 +326,7 @@ fn trim_ascii(mut value: &[u8]) -> &[u8] {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_image_budget;
+    use super::{ImageLayout, inspect_fits, inspect_xisf, validate_image_budget};
 
     fn fits_header(width: u64, height: u64, planes: u64, bitpix: i64, bayer: bool) -> Vec<u8> {
         fn card(keyword: &str, value: &str) -> [u8; 80] {
@@ -312,17 +364,222 @@ mod tests {
         let header = format!(
             "<?xml version=\"1.0\"?><x:xisf xmlns:x=\"urn:test\"><x:Image geometry=\"{geometry}\" sampleFormat=\"{sample_format}\"{compression}/></x:xisf>"
         );
+        xisf_xml_header(header.as_bytes())
+    }
+
+    fn xisf_xml_header(header: &[u8]) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(b"XISF0100");
         bytes.extend_from_slice(&(header.len() as u32).to_le_bytes());
         bytes.extend_from_slice(&[0; 4]);
-        bytes.extend_from_slice(header.as_bytes());
+        bytes.extend_from_slice(header);
         bytes
+    }
+
+    #[test]
+    fn reads_namespaced_xisf_image_attributes_as_strings() {
+        assert_eq!(
+            inspect_xisf(&xisf_header("1200:800:3", "Float32", "zstd:11520000"))
+                .expect("read namespaced, self-closing image"),
+            ImageLayout {
+                width: 1200,
+                height: 800,
+                planes: 3,
+                bytes_per_sample: 4,
+                compressed: true,
+                bayer: false,
+            }
+        );
+    }
+
+    #[test]
+    fn reads_nested_bayer_metadata_and_stops_after_first_image() {
+        for cfa in [
+            "<x:ColorFilterArray/>",
+            "<x:ColorFilterArray></x:ColorFilterArray>",
+        ] {
+            let header = format!(
+                "<x:xisf xmlns:x=\"urn:test\"><x:Image geometry=\"1200:800:1\" sampleFormat=\"UInt16\">{cfa}</x:Image><x:Image geometry=\"50000:50000:3\" sampleFormat=\"Float64\"/></x:xisf>"
+            );
+            assert_eq!(
+                inspect_xisf(&xisf_xml_header(header.as_bytes()))
+                    .expect("read first image and its Bayer flag"),
+                ImageLayout {
+                    width: 1200,
+                    height: 800,
+                    planes: 1,
+                    bytes_per_sample: 2,
+                    compressed: false,
+                    bayer: true,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_utf8_in_xisf_attributes() {
+        let header = b"<xisf><Image geometry=\"2:2:1\" sampleFormat=\"UInt\xFF16\"/></xisf>";
+        let error = inspect_xisf(&xisf_xml_header(header)).expect_err("invalid UTF-8");
+        assert!(error.contains("invalid XISF XML header"), "{error}");
+    }
+
+    #[test]
+    fn rejects_invalid_xisf_geometry_before_decoding() {
+        let error = validate_image_budget(&xisf_header("huge:800:1", "UInt16", ""))
+            .expect_err("invalid geometry");
+        assert!(error.contains("invalid XISF geometry"), "{error}");
     }
 
     #[test]
     fn accepts_representative_large_mono_fits() {
         assert!(validate_image_budget(&fits_header(12_000, 8_000, 1, 16, false)).is_ok());
+    }
+
+    fn set_fits_card(bytes: &mut [u8], index: usize, keyword: &str, value: &str) {
+        let card = &mut bytes[index * 80..(index + 1) * 80];
+        card.fill(b' ');
+        let text = format!("{keyword:<8}= {value:>20}");
+        card[..text.len()].copy_from_slice(text.as_bytes());
+    }
+
+    #[test]
+    fn rejects_empty_fits_primary_even_with_stray_positive_dimensions() {
+        for naxis in [0, 1] {
+            let mut bytes = fits_header(2, 2, 1, 16, false);
+            set_fits_card(&mut bytes, 2, "NAXIS", &naxis.to_string());
+            let error = validate_image_budget(&bytes).expect_err("unsupported primary shape");
+            assert!(error.contains("primary NAXIS"), "{error}");
+        }
+    }
+
+    #[test]
+    fn rejects_empty_third_or_higher_fits_axis_before_following_extensions() {
+        for (naxis, axis) in [(3, "NAXIS3"), (4, "NAXIS4")] {
+            let mut bytes = fits_header(2, 2, 3, 16, true);
+            set_fits_card(&mut bytes, 2, "NAXIS", &naxis.to_string());
+            set_fits_card(&mut bytes, if naxis == 3 { 5 } else { 6 }, axis, "0");
+            let error = validate_image_budget(&bytes).expect_err("empty active axis");
+            assert!(
+                error.contains(axis) && error.contains("not positive"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_structural_fits_cards_instead_of_using_the_last() {
+        for (keyword, value) in [
+            ("NAXIS", "0"),
+            ("NAXIS1", "0"),
+            ("BITPIX", "-64"),
+            ("BAYERPAT", "'RGGB'"),
+        ] {
+            let mut bytes = fits_header(2, 2, 1, 16, true);
+            // Preserve the first Bayer card and END, and use another card
+            // for the duplicate just before a new END.
+            set_fits_card(&mut bytes, 6, keyword, value);
+            bytes[7 * 80..8 * 80].fill(b' ');
+            bytes[7 * 80..7 * 80 + 3].copy_from_slice(b"END");
+            let error = validate_image_budget(&bytes).expect_err("duplicate structural card");
+            assert!(error.contains("duplicate structural"), "{error}");
+        }
+    }
+
+    fn set_hierarch_card(bytes: &mut [u8], index: usize, keyword: &str, value: &str) {
+        let card = &mut bytes[index * 80..(index + 1) * 80];
+        card.fill(b' ');
+        let text = format!("HIERARCH {keyword} = {value}");
+        card[..text.len()].copy_from_slice(text.as_bytes());
+    }
+
+    #[test]
+    fn hierarch_structural_cards_cannot_hide_an_empty_primary() {
+        let mut bytes = fits_header(2, 2, 1, 16, true);
+        set_hierarch_card(&mut bytes, 2, "NAXIS", "0");
+        let error = inspect_fits(&bytes).expect_err("empty HIERARCH primary");
+        assert!(error.contains("primary NAXIS 0"), "{error}");
+
+        set_fits_card(&mut bytes, 5, "NAXIS", "2");
+        let error = inspect_fits(&bytes).expect_err("duplicate HIERARCH primary shape");
+        assert!(error.contains("duplicate structural"), "{error}");
+    }
+
+    #[test]
+    fn includes_hierarch_bayer_metadata_in_the_render_budget() {
+        let mut bytes = fits_header(2, 2, 1, 16, true);
+        set_hierarch_card(&mut bytes, 5, "BAYERPAT", "'RGGB'");
+        assert!(inspect_fits(&bytes).expect("HIERARCH Bayer pattern").bayer);
+    }
+
+    #[test]
+    fn does_not_treat_leading_spaces_as_a_canonical_fits_keyword() {
+        let mut bytes = fits_header(2, 2, 1, 16, false);
+        set_fits_card(&mut bytes, 2, " NAXIS", "2");
+        let error = inspect_fits(&bytes).expect_err("native decoder would see no NAXIS");
+        assert!(error.contains("missing NAXIS"), "{error}");
+    }
+
+    #[test]
+    fn uses_the_decoders_unicode_whitespace_rules_for_fits_keywords() {
+        let mut bytes = fits_header(2, 2, 1, 16, true);
+        let card = &mut bytes[5 * 80..6 * 80];
+        card.fill(b' ');
+        card[..10].copy_from_slice("NAXIS\u{a0} =0".as_bytes());
+        let error = inspect_fits(&bytes).expect_err("duplicate ordinary Unicode-trimmed NAXIS");
+        assert!(error.contains("duplicate structural"), "{error}");
+        set_hierarch_card(&mut bytes, 5, "\u{a0}NAXIS\u{a0}", "0");
+        let error = inspect_fits(&bytes).expect_err("duplicate HIERARCH Unicode-trimmed NAXIS");
+        assert!(error.contains("duplicate structural"), "{error}");
+    }
+
+    #[test]
+    fn noncanonical_fits_axis_names_cannot_replace_the_budgeted_dimensions() {
+        for keyword in ["NAXIS01", "NAXIS+1"] {
+            let mut bytes = fits_header(12_000, 8_000, 1, 16, true);
+            set_fits_card(&mut bytes, 5, keyword, "1");
+            let layout = inspect_fits(&bytes).expect("read canonical primary dimensions");
+            assert_eq!((layout.width, layout.height), (12_000, 8_000));
+        }
+        let mut bytes = fits_header(2, 2, 3, 16, true);
+        set_fits_card(&mut bytes, 5, "NAXIS3", "0");
+        set_fits_card(&mut bytes, 6, "NAXIS03", "1");
+        let error = inspect_fits(&bytes).expect_err("noncanonical axis cannot hide an empty one");
+        assert!(
+            error.contains("NAXIS3") && error.contains("not positive"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn parses_fits_values_without_a_space_after_the_equals_sign() {
+        let mut bytes = fits_header(2, 2, 1, 16, false);
+        let naxis_card = &mut bytes[2 * 80..3 * 80];
+        naxis_card.fill(b' ');
+        naxis_card[..11].copy_from_slice(b"NAXIS   =-2");
+        let error = inspect_fits(&bytes).expect_err("negative NAXIS must not become positive");
+        assert!(error.contains("primary NAXIS -2"), "{error}");
+
+        let naxis_card = &mut bytes[2 * 80..3 * 80];
+        naxis_card[..10].copy_from_slice(b"NAXIS   =2");
+        naxis_card[10] = b' ';
+        assert!(
+            inspect_fits(&bytes).is_ok(),
+            "a no-space positive NAXIS is valid"
+        );
+    }
+
+    #[test]
+    fn budgets_fits_sixteen_bit_samples_for_possible_float_promotion() {
+        let bytes = fits_header(20_000, 12_000, 1, 16, false);
+        assert_eq!(inspect_fits(&bytes).unwrap().bytes_per_sample, 4);
+        // A two-byte estimate is below the 1.5 GiB budget; the possible f32
+        // decode plus render buffers is above it, even without a payload.
+        let error = validate_image_budget(&bytes).expect_err("promoted image exceeds budget");
+        assert!(error.contains("working set"), "{error}");
+        // XISF UInt16 remains an actual two-byte decoded sample.
+        let xisf = xisf_header("20000:12000:1", "UInt16", "");
+        assert_eq!(inspect_xisf(&xisf).unwrap().bytes_per_sample, 2);
+        assert!(validate_image_budget(&xisf).is_ok());
     }
 
     #[test]
