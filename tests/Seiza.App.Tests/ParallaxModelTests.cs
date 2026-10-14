@@ -183,15 +183,16 @@ public sealed class ParallaxModelTests
     }
 
     [Fact]
-    public void APlannedStopOnADepthPlaneTakesThePlaneUnderItsPoint()
+    public void APlannedStopOnADepthPlanePreservesItsExplicitDepth()
     {
-        // The planner gives a stop on a plane its depth. The app leaves it out,
-        // so the stop centres on whatever plane the scene shows at its point.
+        // Keep the planner's explicit depth; the user can clear it to centre
+        // on whatever plane the scene currently shows at the stop's point.
         const string json = """{"schemaVersion":1,"focus":[100,80],"focusName":"Target","seconds":7,"tour":[{"name":"Whole Image","travel":0,"hold":1},{"name":"Sh2-170","focus":[90,70],"dolly":0.88,"zoom":3.2,"pan":0.12,"travel":5,"hold":2,"title":"Sh2-170","depthParsecs":2790}]}""";
         ParallaxTourPlan plan = ParallaxTourPlan.FromJson(json);
         Assert.Equal(0.12, plan.Tour[1].Pan);
+        Assert.Equal(2790, plan.Tour[1].DepthParsecs);
         using var saved = JsonDocument.Parse(plan.ToJson());
-        Assert.False(saved.RootElement.GetProperty("tour")[1].TryGetProperty("depthParsecs", out _));
+        Assert.Equal(2790, saved.RootElement.GetProperty("tour")[1].GetProperty("depthParsecs").GetDouble());
     }
 
     [Fact]

@@ -6,6 +6,19 @@ internal enum ParallaxVideoCodec
     Hevc,
 }
 
+internal enum ParallaxExportFormat
+{
+    Mp4,
+    Mov,
+    Matroska,
+    PngSequence,
+}
+
+internal sealed record ParallaxExportOptions(
+    ParallaxExportFormat Format,
+    ParallaxVideoCodec Codec = ParallaxVideoCodec.H264,
+    string? FfmpegPath = null);
+
 internal sealed record ParallaxExportProgress(int CompletedFrames, int TotalFrames, int AllocatedBuffers = 0)
 {
     public double Fraction => TotalFrames > 0 ? (double)CompletedFrames / TotalFrames : 0;

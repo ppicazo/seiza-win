@@ -23,6 +23,9 @@ public sealed record ParallaxStop
     // An image shown during this stop in place of its title, whether or not
     // titles are shown: a title card with its transparency kept.
     public string? Card { get; set; }
+    // Null centres the stop on the plane currently under its focus. A given
+    // depth preserves the framing of imported/planned itineraries in parsecs.
+    public double? DepthParsecs { get; set; }
     [JsonIgnore] public string DisplayName => Name ?? (Focus is null ? "Whole Image" : "Custom Point");
     public ParallaxStop DeepClone() => this with { Focus = Focus?.ToArray() };
 }
@@ -113,10 +116,14 @@ public sealed record ParallaxSceneSettings
     // Distances given for catalogued objects, by name, in place of the
     // catalogue's, for the nebula's distance and its planes. Null when none.
     public List<ParallaxDistanceOverride>? DistanceOverrides { get; set; }
+    // Painted masks defining regions of the starless image at given depths.
+    // Null leaves the native default (no manually defined planes) unchanged.
+    public List<ParallaxDepthPlane>? Planes { get; set; }
     public ParallaxSceneSettings DeepClone() => this with
     {
         DistanceFocus = DistanceFocus?.ToArray(),
         DistanceOverrides = DistanceOverrides?.Select(given => given with { }).ToList(),
+        Planes = Planes?.Select(plane => plane with { }).ToList(),
     };
     public bool ContentEquals(ParallaxSceneSettings? other) => other is not null &&
         ParallaxJson.SerializeScene(this) == ParallaxJson.SerializeScene(other);
@@ -127,9 +134,17 @@ public sealed record ParallaxSceneSettings
     // Each object takes one distance: a new one replaces the old.
     public void SetDistanceOverride(string name, double parsecs)
     {
+        ArgumentNullException.ThrowIfNull(name);
         var given = new ParallaxDistanceOverride { ObjectName = name.Trim(), DistanceParsecs = parsecs };
         int index = DistanceOverrides?.FindIndex(old => SameObject(old.ObjectName, name)) ?? -1;
-        if (index >= 0) DistanceOverrides![index] = given;
+        if (index >= 0)
+        {
+            DistanceOverrides![index] = given;
+            // Repair duplicates from externally supplied drafts while keeping
+            // the first row's position stable for the inspector.
+            for (int i = DistanceOverrides.Count - 1; i > index; i--)
+                if (SameObject(DistanceOverrides[i].ObjectName, name)) DistanceOverrides.RemoveAt(i);
+        }
         else (DistanceOverrides ??= []).Add(given);
     }
 
@@ -148,6 +163,15 @@ public sealed record ParallaxDistanceOverride
 {
     [JsonPropertyName("object")] public string ObjectName { get; set; } = string.Empty;
     public double DistanceParsecs { get; set; }
+}
+
+public sealed record ParallaxDepthPlane
+{
+    [JsonIgnore] public Guid Id { get; set; } = Guid.NewGuid();
+    public string Mask { get; set; } = string.Empty;
+    public double DistanceParsecs { get; set; } = 400;
+    public string? Name { get; set; }
+    [JsonIgnore] public string DisplayName => string.IsNullOrWhiteSpace(Name) ? Path.GetFileNameWithoutExtension(Mask) : Name;
 }
 
 public sealed record ParallaxLabel
@@ -308,13 +332,18 @@ public sealed record ParallaxComposition
             if (Width is < 16 or > 3840 || Height is < 16 or > 3840 || Width % 2 != 0 || Height % 2 != 0 || Fps is not (24 or 30 or 60))
                 return "Choose even dimensions between 16 and 3840 pixels and 24, 30 or 60 fps.";
             if (Stops is null || Stops.Any(stop => stop is null) || Scene is null || Labels is null ||
-                Scene.DistanceOverrides?.Any(given => given is null || string.IsNullOrWhiteSpace(given.ObjectName)) == true)
+                Scene.DistanceOverrides?.Any(given => given is null || string.IsNullOrWhiteSpace(given.ObjectName)) == true ||
+                Scene.Planes?.Any(plane => plane is null || string.IsNullOrWhiteSpace(plane.Mask)) == true)
                 return "The composition is incomplete.";
             if (!double.IsFinite(Duration) || Duration <= 0 || Duration > 600) return "The video must be longer than zero and at most 10 minutes.";
             if (new[] { Scene.DistanceParsecs, Scene.UnmatchedDistanceParsecs }
                 .Concat(Scene.DistanceOverrides?.Select(given => (double?)given.DistanceParsecs) ?? [])
+                .Concat(Scene.Planes?.Select(plane => (double?)plane.DistanceParsecs) ?? [])
                 .Any(value => value is double distance && (!double.IsFinite(distance) || distance <= 0)))
                 return "Distances must be positive, finite parsec values.";
+            if (Scene.DistanceOverrides is { } overrides && overrides.Select(given => given.ObjectName.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count() != overrides.Count)
+                return "Each named object can have only one distance override.";
             if (!ValidPoint(Scene.DistanceFocus) || !double.IsFinite(Scene.GaiaMaxMagnitude) || Scene.GaiaMaxMagnitude is < 1 or > 25 ||
                 !double.IsFinite(Scene.DustOpacity) || Scene.DustOpacity < 0 || Scene.MaxStars is < 0 || Scene.SmallStars is not ("field" or "drop") ||
                 !double.IsFinite(Scene.MinimumScaleArcsecPerPixel) || !double.IsFinite(Scene.MaximumScaleArcsecPerPixel) ||
@@ -334,7 +363,8 @@ public sealed record ParallaxComposition
             {
                 if (Stops.Count < 2) return "A tour needs at least two stops.";
                 if (Stops.Any(stop => !ValidPoint(stop.Focus) || !Finite(stop.Dolly, stop.Pan, stop.Zoom, stop.RotateDegrees, stop.Travel, stop.Hold, stop.SpinDegrees, stop.Push) ||
-                    stop.Dolly is < 0 or >= 1 || stop.Pan is < 0 or > 1 || stop.Zoom <= 0 || stop.Push is < 0 or >= 1 || stop.Travel < 0 || stop.Hold < 0))
+                    stop.Dolly is < 0 or >= 1 || stop.Pan is < 0 or > 1 || stop.Zoom <= 0 || stop.Push is < 0 or >= 1 || stop.Travel < 0 || stop.Hold < 0 ||
+                    stop.DepthParsecs is double depth && (!double.IsFinite(depth) || depth <= 0)))
                     return "Every stop needs valid framing, spin, push and nonnegative times.";
             }
             return null;

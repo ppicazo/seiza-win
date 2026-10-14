@@ -32,8 +32,12 @@
   <ItemGroup>
     <Compile Include="..\..\src\Seiza.App\Services\ThumbnailPngReader.cs" Link="Services\ThumbnailPngReader.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ParallaxRasterSnapshot.cs" Link="Services\ParallaxRasterSnapshot.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\ParallaxDustMapSnapshot.cs" Link="Services\ParallaxDustMapSnapshot.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ParallaxVideoExporter.cs" Link="Services\ParallaxVideoExporter.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ParallaxVideoExporter.Native.cs" Link="Services\ParallaxVideoExporter.Native.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\ParallaxVideoExporter.Formats.cs" Link="Services\ParallaxVideoExporter.Formats.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\ParallaxVideoExporter.Ffmpeg.cs" Link="Services\ParallaxVideoExporter.Ffmpeg.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\ParallaxExportOutput.cs" Link="Services\ParallaxExportOutput.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ParallaxCore.cs" Link="Services\ParallaxCore.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ParallaxInputPaths.cs" Link="Services\ParallaxInputPaths.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ParallaxDustMapOutput.cs" Link="Services\ParallaxDustMapOutput.cs" />

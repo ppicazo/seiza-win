@@ -32,7 +32,7 @@ orientation without passing through the viewer's eight-bit display bitmap.
    scene changes require preparation again.
 3. In **Labels**, configure object labels, custom point/radius labels, label
    colour, an optional credit and logo, and title cards.
-4. In **Output**, choose dimensions, frame rate, native codec and render
+4. In **Output**, choose the output format, dimensions, frame rate, codec and render
    quality, then **Export Video**. Export fits the full-resolution camera and
    renders its frames independently of the smaller interactive preview.
 
@@ -43,7 +43,7 @@ The editor exposes the same composition controls as the Mac implementation:
 - Fly-in timing, start framing, dolly, pan, opening/end zoom, start/end roll,
   sideways swing and direction, and easing.
 - Automatic tours with target count, hold and motion controls; editable stops
-  with point/whole-image focus, travel and hold, zoom, dolly, pan, roll, spin,
+  with point/whole-image focus, optional target depth, travel and hold, zoom, dolly, pan, roll, spin,
   push, optional titles and title cards; stop insertion, duplication,
   reordering and removal.
 - Tour glide, titles, looping and JSON itinerary load/save. Shared schema-1
@@ -55,8 +55,8 @@ The editor exposes the same composition controls as the Mac implementation:
 - Moving-star limit, remaining-star policy, background galaxies, dust dimming,
   dust maps, star growth/fade controls, catalogue/custom labels, credit, logo
   and title cards.
-- Automatic depth planes, with the planes found listed and distances given for
-  catalogued objects in place of the catalogue's.
+- Automatic and custom mask-defined depth planes, with the planes found listed
+  and distances given for any named catalogued object in place of the catalogue's.
 - Undo/redo, fitted-camera warnings, bounded automatic camera previews,
   timeline playback, progress/activity reporting and cancellation.
 
@@ -83,6 +83,14 @@ behind can show, so a star seen there flies in front of the nebula.
   changes: the scene is not prepared again, and the preview keeps its camera.
 - **Reload** reads the chosen map again after it was edited elsewhere.
 - **Reset** returns to the dust counted from the stars.
+- **Paint Dust Map…** opens a private mask draft over the source image. Paint
+  opaque dust or clear sky with a soft brush, choose its diameter and strength,
+  view the mask alone, and undo/redo up to 20 strokes. **Reset edits** restores
+  the map that was opened. Only **Apply** changes the scene; Cancel leaves it
+  unchanged. The editor is bounded to 768 pixels on its longer side and stores
+  an applied map as a private 16-bit PNG, so later scene preparations retain it.
+- **Dust map to export** chooses the current map or the original dust counted
+  from stars, without first removing a painted or imported map.
 
 The *Stars and dust* section says where the dust came from and how many stars
 the map brought in front. The map path lives with the open window, like the
@@ -112,6 +120,13 @@ dust.
   prepared again; until then the list shows what the last preparation found.
   Given for the nebula itself, a distance also sets the nebula's.
 - **Reset** drops the distance given.
+- **Add Object Distance…** gives a distance to any object by catalogue name,
+  replacing an existing override regardless of case. This can explicitly lift
+  a large object that automatic plane selection otherwise keeps on the background.
+- **Add Plane Mask…**, under *Custom depth planes*, chooses a white-on-black
+  image, an optional name and a positive distance in parsecs. Masks may have a
+  different resolution but must match the source's shape. Change or remove each
+  plane independently; custom masks work without automatic planes or catalogues.
 - A cloud of dust that no catalogued object names, placed by the star counts,
   shows its distance but cannot be given one.
 - A distance given for an object that is no longer a plane, for instance one
@@ -119,9 +134,11 @@ dust.
   until it is reset.
 
 Planes and given distances are scene settings, with undo: changing either
-prepares the scene again. A tour stop centres on the plane under its point, so
-a generated tour frames a stop on a plane at that plane's distance. Itineraries
-do not record the planes or the distances given.
+requires preparing the scene again. A tour stop normally centres on the plane
+under its point; **Set target plane distance** overrides that camera target
+depth without moving the scene's planes. Itineraries preserve explicit stop
+depths (`depthParsecs`), but do not record scene masks or object-distance overrides.
+Scene-aware editable tour generation is a separate Seiza 0.30.1 adoption.
 
 Behind a lifted plane the image keeps only a smooth fill. Where a tour stop
 would show much of it, the fit flies that stop less far and zooms in to keep
@@ -181,11 +198,22 @@ failure is reported rather than retried indefinitely.
 
 ## Native video export and safety
 
-Movies are silent SDR MP4 files, encoded through Windows Media Foundation's
+MP4 movies are silent SDR files, encoded through Windows Media Foundation's
 WinRT `MediaStreamSource`/`MediaTranscoder` APIs. H.264 and HEVC are available as
 choices, with hardware acceleration allowed. HEVC requires an encoder available
 to the Windows media stack; if unavailable, Seiza reports the failure and
 suggests H.264 rather than downloading a codec or using an external encoder.
+
+**MOV** and **Matroska / MKV** use an optional installed FFmpeg. Choose its
+executable in Output or leave it unset to search PATH. Seiza never downloads or
+bundles FFmpeg. H.264 needs `libx264` or `libopenh264`; HEVC needs `libx265`.
+Frames stream directly to the encoder with one reusable buffer. Cancellation
+terminates and joins the child process before cleanup; no shell is involved.
+
+**PNG sequence** writes lossless, top-down `frame-00000.png`, `frame-00001.png`,
+and so on. Enter a new sequence folder name, then choose its parent on export.
+Only the complete sequence is published; existing folders are never cleared,
+merged into, or replaced. No video encoder or FFmpeg is needed.
 
 The export limits match the Mac implementation: even width/height from 16 to
 3840 pixels, 1–60 frames per second and 2–36,000 frames. Bitrate is at least
@@ -206,6 +234,10 @@ destination before this staging operation.
 Cancellation is connected to both the Windows async operation and blocked frame
 production; callback work is joined before its native source is released. Some
 synchronous core stages must finish their current call before closing completes.
+MOV/MKV use the same completed-file publication policy; PNG stages a unique
+sibling directory. All formats check source images, layer files, artwork, plane
+masks and selected encoder executables for direct or file-identity aliases
+before encoding and again before publication.
 
 ## Validation
 

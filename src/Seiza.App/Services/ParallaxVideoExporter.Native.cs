@@ -12,7 +12,21 @@ internal static partial class ParallaxVideoExporter
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(video);
-        return ExportAsync(new NativeVideoSource(video), destinationPath, codec, progress, cancellationToken);
+        return ExportAsync(video, destinationPath, new ParallaxExportOptions(ParallaxExportFormat.Mp4, codec),
+            progress: progress, cancellationToken: cancellationToken);
+    }
+
+    public static Task ExportAsync(
+        ParallaxVideo video,
+        string destinationPath,
+        ParallaxExportOptions options,
+        IEnumerable<string?>? additionalProtectedPaths = null,
+        IProgress<ParallaxExportProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(video);
+        return ExportAsync(new NativeVideoSource(video), destinationPath, options,
+            video.ProtectedPaths.Concat(additionalProtectedPaths ?? []), progress, cancellationToken);
     }
 
     private sealed class NativeVideoSource(ParallaxVideo video) : IParallaxVideoFrameSource

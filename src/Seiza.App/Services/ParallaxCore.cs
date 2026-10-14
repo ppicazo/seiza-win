@@ -40,7 +40,8 @@ internal static class ParallaxCore
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
         string[] protectedPaths = ParallaxInputPaths.Capture(
-            [.. ParallaxInputPaths.FromInputs(request.Inputs), .. ParallaxInputPaths.FromVideo(request.Video)]);
+            [.. ParallaxInputPaths.FromInputs(request.Inputs), .. ParallaxInputPaths.FromScene(request.Scene),
+                .. ParallaxInputPaths.FromVideo(request.Video)]);
         using var scope = new EventScope(events, cancellationToken);
         nint result = NativeMethods.PrepareParallaxJson(request.ToJson(), scope.Signal, &ReceiveEvent, scope.Context, out nint error);
         return FinishVideo(result, error, scope, protectedPaths);
