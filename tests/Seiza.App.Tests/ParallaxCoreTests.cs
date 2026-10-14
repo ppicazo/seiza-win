@@ -155,6 +155,28 @@ public sealed class ParallaxCoreTests
         Assert.Equal(66 * 48 * 4, video.RenderBgraFrame(video.FrameCount - 1).Length);
     }
 
+    // Needs Seiza 0.30.1, which adds seiza_parallax_plan_scene_tour_json:
+    // against 0.30.0 it fails with a missing entry point. It is the only test
+    // that calls it.
+    [Fact]
+    public void ATourPlannedOnThePreparedSceneGoesBackIntoItWithoutPreparingAgain()
+    {
+        using var fixture = new Fixture();
+        fixture.WriteObjectCatalog();
+        using var scene = ParallaxCore.Prepare(fixture.Request);
+        ParallaxTourPlan plan = ParallaxCore.PlanOnScene(scene, "66x48", new() { Targets = 1, Hold = 0.25, Motion = 0.2 });
+        Assert.True(plan.PlannedOnScene);
+        Assert.Contains(plan.Tour, stop => stop.Name == "NGC 9001" && stop.Title == "NGC 9001");
+        var composition = new ParallaxComposition { Scene = fixture.Request.Scene.DeepClone() };
+        composition.ApplyTour(plan);
+        Assert.True(composition.Scene.ContentEquals(fixture.Request.Scene));
+        using var toured = ParallaxCore.Reconfigure(scene, fixture.Request.Video with { Tour = composition.Stops });
+        Assert.Equal(scene.Summary.BackgroundFocus, toured.Summary.BackgroundFocus);
+        Assert.Equal(scene.Summary.BackgroundDistanceParsecs, toured.Summary.BackgroundDistanceParsecs);
+        Assert.Equal(66 * 48 * 4, toured.RenderBgraFrame(toured.FrameCount - 1).Length);
+        Assert.ThrowsAny<Exception>(() => ParallaxCore.PlanOnScene(scene, "not a size", new()));
+    }
+
     [Fact]
     public void DepthPlanesAndGivenDistancesReachTheCore()
     {

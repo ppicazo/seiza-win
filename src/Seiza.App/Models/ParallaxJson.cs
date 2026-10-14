@@ -38,6 +38,15 @@ internal static class ParallaxJson
         if (path is not null) writer.WriteString("path", path);
     });
 
+    // {"size": "WIDTHxHEIGHT", "autoTour": {targets, hold, motion}} for a tour
+    // planned on a prepared scene.
+    internal static string SerializeSceneTourSettings(string size, ParallaxTourOptions options) => WriteObject(writer =>
+    {
+        writer.WriteString("size", size);
+        writer.WritePropertyName("autoTour");
+        JsonSerializer.Serialize(writer, options, ParallaxJsonContext.Default.ParallaxTourOptions);
+    });
+
     internal static string SerializeDustMapWrite(string path, bool counted) => WriteObject(writer =>
     {
         writer.WriteString("path", path);

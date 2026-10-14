@@ -338,7 +338,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         if (PickingDistance) { Edit(c => { c.Scene.DistanceFocus = [x, y]; c.DistanceName = "Custom point"; }); PickingDistance = false; }
         else if (PickingDestination)
         {
-            if (Composition.Motion == ParallaxMotion.Tour) EditStop(s => { s.Focus = [x, y]; s.Name = "Custom Point"; });
+            if (Composition.Motion == ParallaxMotion.Tour) EditStop(s => { s.Focus = [x, y]; s.Name = "Custom Point"; s.DepthParsecs = null; });
             else Edit(c => { c.Focus = [x, y]; c.FocusName = "Custom Point"; });
             PickingDestination = false;
         }
@@ -418,6 +418,23 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     {
         if (!SourceReady || IsBusy || _closed || _catalogs.IsRunning) return;
         if (!double.IsFinite(TourOptions.Hold) || TourOptions.Hold < 0 || !double.IsFinite(TourOptions.Motion) || TourOptions.Motion < 0) { Error = "Tour hold and motion must be finite and nonnegative."; Notify(); return; }
+        // A prepared scene plans each stop at the depth it shows its target at,
+        // with no solve, for the full output frame. The scene keeps the
+        // distance it was prepared with.
+        if (_scene is { } scene)
+        {
+            string size = Composition.VideoSettings(false).Size;
+            ParallaxTourOptions options = TourOptions with { };
+            var (sceneSignal, sceneGeneration) = Begin("Planning tour on the prepared scene…");
+            try
+            {
+                var plan = await ParallaxCore.PlanOnSceneAsync(scene, size, options, sceneSignal.Token);
+                if (!_closed && sceneGeneration == _revision) { Candidate = plan; Status = $"Generated {plan.Tour.Count} stops on the prepared scene. Apply the tour or keep your draft."; }
+                Finish(sceneSignal, null);
+            }
+            catch (Exception e) { Finish(sceneSignal, e); }
+            return;
+        }
         ParallaxRequest request;
         try { request = Request(false); } catch (Exception e) { Error = e.Message; Notify(); return; }
         request.AutoTour = TourOptions with { }; request.Video.Tour = [];
@@ -436,12 +453,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public void ApplyCandidate()
     {
         if (Candidate is not { } plan) return;
-        Edit(c =>
-        {
-            c.Motion = ParallaxMotion.Tour; c.Stops = plan.Tour.Select(s => s.DeepClone()).ToList();
-            c.Scene.DistanceFocus = plan.Focus.ToArray(); c.DistanceName = plan.FocusName;
-            c.TourGlide = plan.TourGlide ?? c.TourGlide; c.TourTitles = plan.TourTitles ?? c.TourTitles; c.TourLoop = plan.TourLoop ?? c.TourLoop;
-        });
+        Edit(c => c.ApplyTour(plan));
         SelectedStop = plan.Tour[0].Id; Candidate = null; Notify();
     }
     public void DiscardCandidate() { Candidate = null; Notify(); }

@@ -23,6 +23,10 @@ public sealed record ParallaxStop
     // An image shown during this stop in place of its title, whether or not
     // titles are shown: a title card with its transparency kept.
     public string? Card { get; set; }
+    // The distance of the plane the stop centres its point on, from a tour
+    // planned on the prepared scene. Null centres on the plane the scene shows
+    // at the point; moving the point drops it.
+    public double? DepthParsecs { get; set; }
     [JsonIgnore] public string DisplayName => Name ?? (Focus is null ? "Whole Image" : "Custom Point");
     public ParallaxStop DeepClone() => this with { Focus = Focus?.ToArray() };
 }
@@ -45,6 +49,9 @@ public sealed record ParallaxTourPlan
     public double? TourGlide { get; set; }
     public bool? TourTitles { get; set; }
     public bool? TourLoop { get; set; }
+    // Planned on the prepared scene, whose depths its stops carry, rather than
+    // from the catalogue alone.
+    [JsonIgnore] public bool PlannedOnScene { get; set; }
     public string ToJson() => ParallaxJson.SerializePlan(this);
     public static ParallaxTourPlan FromJson(string json) => ParallaxJson.DeserializePlan(json);
 
@@ -288,6 +295,21 @@ public sealed record ParallaxComposition
     public double ArrivalAt(int index) => index < 0 || index >= Stops.Count ? 0 :
         Stops.Take(index).Sum(stop => stop.Hold) + Stops.Take(index + 1).Skip(1).Sum(stop => stop.Travel);
 
+    // Replace the draft's tour with `plan`. A tour planned from the catalogue
+    // alone also moves the distance reference to its focus, the target most
+    // worth a visit, and its stops centre on the planes the scene shows at
+    // their points. One planned on the prepared scene keeps the scene's
+    // distance reference, as moving it would prepare the scene again, and its
+    // stops keep the depths the scene gave them.
+    public void ApplyTour(ParallaxTourPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        Motion = ParallaxMotion.Tour;
+        Stops = plan.Tour.Select(stop => stop.DeepClone() with { DepthParsecs = plan.PlannedOnScene ? stop.DepthParsecs : null }).ToList();
+        if (!plan.PlannedOnScene) { Scene.DistanceFocus = plan.Focus.ToArray(); DistanceName = plan.FocusName; }
+        TourGlide = plan.TourGlide ?? TourGlide; TourTitles = plan.TourTitles ?? TourTitles; TourLoop = plan.TourLoop ?? TourLoop;
+    }
+
     public void SetSpin(int index, bool clockwise)
     {
         if (index < 0 || index >= Stops.Count) return;
@@ -334,7 +356,8 @@ public sealed record ParallaxComposition
             {
                 if (Stops.Count < 2) return "A tour needs at least two stops.";
                 if (Stops.Any(stop => !ValidPoint(stop.Focus) || !Finite(stop.Dolly, stop.Pan, stop.Zoom, stop.RotateDegrees, stop.Travel, stop.Hold, stop.SpinDegrees, stop.Push) ||
-                    stop.Dolly is < 0 or >= 1 || stop.Pan is < 0 or > 1 || stop.Zoom <= 0 || stop.Push is < 0 or >= 1 || stop.Travel < 0 || stop.Hold < 0))
+                    stop.Dolly is < 0 or >= 1 || stop.Pan is < 0 or > 1 || stop.Zoom <= 0 || stop.Push is < 0 or >= 1 || stop.Travel < 0 || stop.Hold < 0 ||
+                    stop.DepthParsecs is double depth && (!double.IsFinite(depth) || depth <= 0)))
                     return "Every stop needs valid framing, spin, push and nonnegative times.";
             }
             return null;

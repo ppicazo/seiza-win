@@ -598,7 +598,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             Note(stop, "An image with transparency shown during this stop in place of its title, whether or not titles are shown. Make it the video's size for sharp lettering.");
             Button(stop, "Pick Destination", BeginPickDestination);
             Button(stop, "Use Whole Image", () => Session.EditStop(s =>
-            { s.Focus = null; s.Name = "Whole Image"; s.Dolly = 0; s.Zoom = 1; s.Pan = 0; }));
+            { s.Focus = null; s.Name = "Whole Image"; s.Dolly = 0; s.Zoom = 1; s.Pan = 0; s.DepthParsecs = null; }));
             DestinationCoordinates(stop);
             Number(stop, "Travel to stop (s)", () => SelectedStop()?.Travel ?? 0,
                 value => Session.EditStop(s => s.Travel = value), 0, 600, 0.1, () => Session.SelectedIndex > 0);
@@ -812,7 +812,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
     {
         double[] point = (Composition.Motion == ParallaxMotion.Tour ? SelectedStop()?.Focus : Composition.Focus)?.ToArray() ?? Center();
         point[axis] = value;
-        if (Composition.Motion == ParallaxMotion.Tour) Session.EditStop(stop => { stop.Focus = point; stop.Name = "Custom Point"; });
+        if (Composition.Motion == ParallaxMotion.Tour) Session.EditStop(stop => { stop.Focus = point; stop.Name = "Custom Point"; stop.DepthParsecs = null; });
         else Session.Edit(c => { c.Focus = point; c.FocusName = "Custom Point"; });
     }
 

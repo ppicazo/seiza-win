@@ -123,6 +123,13 @@ prepares the scene again. A tour stop centres on the plane under its point, so
 a generated tour frames a stop on a plane at that plane's distance. Itineraries
 do not record the planes or the distances given.
 
+Once a scene is prepared, generating a tour plans it on that scene, for the
+full output size: each stop keeps the depth of the plane the scene shows its
+target on, and no image is solved. Applying such a tour leaves the distance
+reference alone, so the scene is not prepared again. Before a scene is
+prepared, a tour is planned from the catalogue alone, and applying it moves the
+distance reference to its chief target. Moving a stop's point drops its depth.
+
 Behind a lifted plane the image keeps only a smooth fill. Where a tour stop
 would show much of it, the fit flies that stop less far and zooms in to keep
 its target's size; the *Preview* section lists the change as the stop's dolly.
