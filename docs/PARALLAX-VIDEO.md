@@ -31,8 +31,8 @@ orientation without passing through the viewer's eight-bit display bitmap.
    it, then adjust the camera. Camera-only edits reuse the prepared scene;
    scene changes require preparation again.
 3. In **Labels**, configure object labels, custom point/radius labels, label
-   colour and an optional credit.
-4. In **Output**, choose dimensions, frame rate, native codec and render
+   colour, an optional credit and logo, and title cards.
+4. In **Output**, choose the output format, dimensions, frame rate, codec and render
    quality, then **Export Video**. Export fits the full-resolution camera and
    renders its frames independently of the smaller interactive preview.
 
@@ -43,8 +43,9 @@ The editor exposes the same composition controls as the Mac implementation:
 - Fly-in timing, start framing, dolly, pan, opening/end zoom, start/end roll,
   sideways swing and direction, and easing.
 - Automatic tours with target count, hold and motion controls; editable stops
-  with point/whole-image focus, travel and hold, zoom, dolly, pan, roll, spin,
-  push and optional titles; stop insertion, duplication, reordering and removal.
+  with point/whole-image focus, optional target depth, travel and hold, zoom, dolly, pan, roll, spin,
+  push, optional titles and title cards; stop insertion, duplication,
+  reordering and removal.
 - Tour glide, titles, looping and JSON itinerary load/save. Shared schema-1
   itineraries remain portable; an itinerary is not a complete project archive
   and does not embed source images or separated layers.
@@ -52,9 +53,10 @@ The editor exposes the same composition controls as the Mac implementation:
   online stellar distances, Gaia magnitude depth and optional distance/object
   input files.
 - Moving-star limit, remaining-star policy, background galaxies, dust dimming,
-  dust maps, star growth/fade controls, catalogue/custom labels and credit.
-- Automatic depth planes, with the planes found listed and distances given for
-  catalogued objects in place of the catalogue's.
+  dust maps, star growth/fade controls, catalogue/custom labels, credit, logo
+  and title cards.
+- Automatic and custom mask-defined depth planes, with the planes found listed
+  and distances given for any named catalogued object in place of the catalogue's.
 - Undo/redo, fitted-camera warnings, bounded automatic camera previews,
   timeline playback, progress/activity reporting and cancellation.
 
@@ -81,6 +83,14 @@ behind can show, so a star seen there flies in front of the nebula.
   changes: the scene is not prepared again, and the preview keeps its camera.
 - **Reload** reads the chosen map again after it was edited elsewhere.
 - **Reset** returns to the dust counted from the stars.
+- **Paint Dust Map…** opens a private mask draft over the source image. Paint
+  opaque dust or clear sky with a soft brush, choose its diameter and strength,
+  view the mask alone, and undo/redo up to 20 strokes. **Reset edits** restores
+  the map that was opened. Only **Apply** changes the scene; Cancel leaves it
+  unchanged. The editor is bounded to 768 pixels on its longer side and stores
+  an applied map as a private 16-bit PNG, so later scene preparations retain it.
+- **Dust map to export** chooses the current map or the original dust counted
+  from stars, without first removing a painted or imported map.
 
 The *Stars and dust* section says where the dust came from and how many stars
 the map brought in front. The map path lives with the open window, like the
@@ -110,6 +120,13 @@ dust.
   prepared again; until then the list shows what the last preparation found.
   Given for the nebula itself, a distance also sets the nebula's.
 - **Reset** drops the distance given.
+- **Add Object Distance…** gives a distance to any object by catalogue name,
+  replacing an existing override regardless of case. This can explicitly lift
+  a large object that automatic plane selection otherwise keeps on the background.
+- **Add Plane Mask…**, under *Custom depth planes*, chooses a white-on-black
+  image, an optional name and a positive distance in parsecs. Masks may have a
+  different resolution but must match the source's shape. Change or remove each
+  plane independently; custom masks work without automatic planes or catalogues.
 - A cloud of dust that no catalogued object names, placed by the star counts,
   shows its distance but cannot be given one.
 - A distance given for an object that is no longer a plane, for instance one
@@ -117,9 +134,46 @@ dust.
   until it is reset.
 
 Planes and given distances are scene settings, with undo: changing either
-prepares the scene again. A tour stop centres on the plane under its point, so
-a generated tour frames a stop on a plane at that plane's distance. Itineraries
-do not record the planes or the distances given.
+requires preparing the scene again. A tour stop normally centres on the plane
+under its point; **Set target plane distance** overrides that camera target
+depth without moving the scene's planes. Itineraries preserve explicit stop
+depths (`depthParsecs`), but do not record scene masks or object-distance overrides.
+Seiza 0.30.1 supplies the prepared-scene planner used below.
+
+Once a scene is prepared, generating a tour plans it on that scene, for the
+full output size: each stop keeps the depth of the plane the scene shows its
+target on, and no image is solved. Applying such a tour leaves the distance
+reference alone, so the scene is not prepared again. Before a scene is
+prepared, a tour is planned from the catalogue alone, and applying it moves the
+distance reference to its chief target. Moving a stop's point drops its depth.
+
+Behind a lifted plane the image keeps only a smooth fill. Where a tour stop
+would show much of it, the fit flies that stop less far and zooms in to keep
+its target's size; the *Preview* section lists the change as the stop's dolly.
+
+## Logo and title cards
+
+Images with transparency, PNG or TIFF, can go over the video as well as text.
+
+- **Logo**, in the *Credit* section, draws an image in the credit's corner of
+  every frame. **Logo size** is its height as a share of the frame's shorter
+  side, 0.06 by default; it is never wider than a third of the frame. With
+  credit text too, the logo sits just inside the text. **Corner** and
+  **Opacity** move and fade the credit text and the logo alike.
+- **Opening card** and **Closing card**, in the *Title cards* section, show a
+  card over the start and the end, each for **Card seconds**. The opening card
+  shows whole from the first frame and fades out; the closing card fades in for
+  the end. A looping tour shows both across its join, so it still loops.
+- **Title card** on a tour stop shows a card during that stop, with the timing
+  a title has, in place of the title. It shows whether or not *Show stop
+  titles* is on.
+
+A card is fitted inside the frame and centred. Make it the video's size, such
+as 1920 × 1080, for sharp lettering. A card without transparency hides the
+frame while it shows, and one of another shape than the frame shrinks to fit;
+preparation warns of both. A file that cannot be read stops preparation with
+its name. Itineraries record each stop's card by its path; the logo and the
+opening and closing cards live with the open window.
 
 ## Offline distances
 
@@ -151,11 +205,22 @@ failure is reported rather than retried indefinitely.
 
 ## Native video export and safety
 
-Movies are silent SDR MP4 files, encoded through Windows Media Foundation's
+MP4 movies are silent SDR files, encoded through Windows Media Foundation's
 WinRT `MediaStreamSource`/`MediaTranscoder` APIs. H.264 and HEVC are available as
 choices, with hardware acceleration allowed. HEVC requires an encoder available
 to the Windows media stack; if unavailable, Seiza reports the failure and
 suggests H.264 rather than downloading a codec or using an external encoder.
+
+**MOV** and **Matroska / MKV** use an optional installed FFmpeg. Choose its
+executable in Output or leave it unset to search PATH. Seiza never downloads or
+bundles FFmpeg. H.264 needs `libx264` or `libopenh264`; HEVC needs `libx265`.
+Frames stream directly to the encoder with one reusable buffer. Cancellation
+terminates and joins the child process before cleanup; no shell is involved.
+
+**PNG sequence** writes lossless, top-down `frame-00000.png`, `frame-00001.png`,
+and so on. Enter a new sequence folder name, then choose its parent on export.
+Only the complete sequence is published; existing folders are never cleared,
+merged into, or replaced. No video encoder or FFmpeg is needed.
 
 The export limits match the Mac implementation: even width/height from 16 to
 3840 pixels, 1–60 frames per second and 2–36,000 frames. Bitrate is at least
@@ -176,6 +241,18 @@ destination before this staging operation.
 Cancellation is connected to both the Windows async operation and blocked frame
 production; callback work is joined before its native source is released. Some
 synchronous core stages must finish their current call before closing completes.
+MOV/MKV use the same completed-file publication policy; PNG stages a unique
+sibling directory. All formats check source images, layer files, artwork, plane
+masks and selected encoder executables for direct or file-identity aliases
+before encoding and again before publication.
+Inputs selected earlier in the same window remain protected after replacing a
+map, artwork or mask and preparing a new scene; export to a different filename.
+
+Windows Media Foundation can report an MKV's frame rate as half its actual
+rate. Validation therefore checks Matroska's `DefaultDuration`, independently
+decoded frame timestamps/count/duration, and timed Windows-decoded pixels;
+it does not rely on that Windows metadata field. The generated files retain
+the selected frame rate. MOV/MP4 metadata does not show this discrepancy.
 
 ## Validation
 

@@ -30,7 +30,7 @@ internal static partial class ParallaxVideoExporter
         IProgress<ParallaxExportProgress>? progress = null,
         CancellationToken cancellationToken = default) =>
         ExportWithPreparationAsync(video, destinationPath, codec, PrepareEncodingAsync,
-            progress, cancellationToken);
+            progress, cancellationToken: cancellationToken);
 
     // Per-export injection keeps setup failures testable without mutable process-wide state.
     internal static async Task ExportWithPreparationAsync(
@@ -39,6 +39,7 @@ internal static partial class ParallaxVideoExporter
         ParallaxVideoCodec codec,
         PrepareEncoding prepareEncoding,
         IProgress<ParallaxExportProgress>? progress = null,
+        IEnumerable<string?>? protectedPaths = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(video);
@@ -46,7 +47,8 @@ internal static partial class ParallaxVideoExporter
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
         Validate(video, codec);
         cancellationToken.ThrowIfCancellationRequested();
-        string destination = Path.GetFullPath(destinationPath);
+        string[] protectedFiles = ParallaxInputPaths.Capture(protectedPaths ?? []);
+        string destination = ParallaxExportOutput.ValidateFile(destinationPath, ParallaxExportFormat.Mp4, protectedFiles);
         string directory = Path.GetDirectoryName(destination)
             ?? throw new ArgumentException("The movie needs an output directory.", nameof(destinationPath));
         if (!Directory.Exists(directory))
@@ -70,6 +72,8 @@ internal static partial class ParallaxVideoExporter
             }
             cancellationToken.ThrowIfCancellationRequested();
             // The sibling staging file is complete and closed before this same-volume rename.
+            ParallaxExportOutput.ValidateFile(destination, ParallaxExportFormat.Mp4, protectedFiles);
+            cancellationToken.ThrowIfCancellationRequested();
             File.Move(staging, destination, overwrite: true);
         }
         finally

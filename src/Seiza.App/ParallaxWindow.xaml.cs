@@ -40,6 +40,9 @@ public sealed partial class ParallaxWindow : Window, IDisposable
     private bool _loaded;
     private bool _closed;
     private ContentDialog? _activityDialog;
+    private ContentDialog? _editDialog;
+    private IReadOnlyList<ParallaxPlane>? _inspectorPlanes;
+    private string _sequenceFolderName = "Parallax frames";
     private readonly ParallaxWindowSizing _windowSizing;
 
     internal ParallaxSession Session { get; }
@@ -53,6 +56,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         Title = $"Parallax Video — {session.SourceName}";
         AppWindow.SetIcon("Assets/AppIcon.ico");
         SourceNameText.Text = session.SourceName;
+        _sequenceFolderName = Path.GetFileNameWithoutExtension(session.SourceName) + "-frames";
         ContentRoot.Loaded += ContentRoot_Loaded;
         Closed += Window_Closed;
         Session.PropertyChanged += Session_PropertyChanged;
@@ -104,6 +108,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         _activityTimer.Tick -= ActivityTimer_Tick;
         _windowSizing.Dispose();
         _activityDialog?.Hide();
+        _editDialog?.Hide();
         ContentRoot.Loaded -= ContentRoot_Loaded;
         Closed -= Window_Closed;
         Session.PropertyChanged -= Session_PropertyChanged;
@@ -164,10 +169,12 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             UpdateActivity();
 
             string structure = $"{InspectorPicker.SelectedIndex}:{Composition.Motion}:{Session.SelectedStop}:" +
-                $"{Session.SelectedIndex}:" + string.Join(',', Composition.Labels.Select(label => label.Id)) + ":" + PlaneRowsKey();
-            if (_inspectorStructure != structure)
+                $"{Session.SelectedIndex}:" + string.Join(',', Composition.Labels.Select(label => label.Id)) + ":" + PlaneRowsKey() + ":" +
+                string.Join(',', (Composition.Scene.Planes ?? []).Select(plane => plane.Id)) + ":" + Session.ExportFormat;
+            if (_inspectorStructure != structure || !ReferenceEquals(_inspectorPlanes, Session.ScenePlanes))
             {
                 _inspectorStructure = structure;
+                _inspectorPlanes = Session.ScenePlanes;
                 BuildInspector();
             }
             foreach (Action refresh in _refreshControls) refresh();
@@ -347,6 +354,22 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         Number(panel, field, () => get() ?? fallback, value => set(value), 0, enabled: () => get() is not null);
     }
 
+    // An image laid over the frames, its transparency kept: a logo or a title
+    // card. Its path is part of the draft, so choosing one can be undone.
+    private void ImagePicker(StackPanel panel, string title, Func<string?> get, Action<string?> set, params string[] extensions)
+    {
+        panel.Children.Add(new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap });
+        var row = ButtonRow(panel);
+        Button choose = AsyncButton(row, "Choose…", async () =>
+        {
+            if (await PickFileAsync(extensions.Length == 0 ? [".png", ".tif", ".tiff"] : extensions) is { } path) set(path);
+        });
+        AutomationProperties.SetName(choose, $"Choose {title.ToLowerInvariant()}");
+        Button clear = Button(row, "Clear", () => set(null), () => get() is not null);
+        AutomationProperties.SetName(clear, $"Clear {title.ToLowerInvariant()}");
+        Note(panel, value: () => get() is { } path ? Path.GetFileName(path) : "None selected");
+    }
+
     private void InputPicker(StackPanel panel, ParallaxInputFile kind, string title)
     {
         panel.Children.Add(new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap });
@@ -429,6 +452,9 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         var dust = ButtonRow(stars);
         AsyncButton(dust, "Reload", Session.ReloadDustMapAsync, () => Session.CanReloadDustMap);
         AsyncButton(dust, "Export Dust Map…", ExportDustMapAsync, () => Session.CanExportDustMap);
+        AsyncButton(stars, "Paint Dust Map…", EditDustMapAsync, () => Session.CanEditDustMap);
+        Choice(stars, "Dust map to export", () => Session.ExportCountedDustMap, value => Session.ExportCountedDustMap = value,
+            (false, "Current map"), (true, "Counted from stars"));
         Note(stars, value: () => Session.DustDescription);
 
         StackPanel depthPlanes = Section("Depth planes");
@@ -436,6 +462,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             value => Session.Edit(c => c.Scene.AutoPlanes = value));
         Note(depthPlanes, "Catalogued nebulae at distances of their own, and dust clouds in front of the nebula, move on planes of their own. A dark nebula moves with the dust it lies in.");
         Note(depthPlanes, value: () => Session.PlanesDescription);
+        AsyncButton(depthPlanes, "Add Object Distance…", AddObjectDistanceAsync);
         var (planes, others) = PlaneRows();
         foreach (ParallaxPlane plane in planes) PlaneRow(depthPlanes, plane);
         if (others.Count > 0)
@@ -450,6 +477,33 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         }
         if (others.Count > 0 || planes.Any(plane => plane.ObjectName is not null))
             Note(depthPlanes, "A distance you give replaces the catalogue's, for the nebula's distance and its planes, when the scene is prepared.");
+        Note(depthPlanes, "Name any catalogued object to override its distance, including large objects that automatic planes leave on the background.");
+
+        StackPanel manualPlanes = Section("Custom depth planes");
+        AsyncButton(manualPlanes, "Add Plane Mask…", AddDepthPlaneAsync);
+        Note(manualPlanes, "A white mask lifts that part of the starless image to its own distance. Black stays on the background. Masks use the source image's shape and may be a different resolution.");
+        foreach (ParallaxDepthPlane original in Composition.Scene.Planes ?? [])
+        {
+            Guid id = original.Id;
+            ParallaxDepthPlane? Plane() => Composition.Scene.Planes?.FirstOrDefault(plane => plane.Id == id);
+            void EditPlane(Action<ParallaxDepthPlane> edit) => Session.Edit(c =>
+            {
+                if (c.Scene.Planes?.FirstOrDefault(plane => plane.Id == id) is { } current) edit(current);
+            });
+            StackPanel card = Card(manualPlanes);
+            Note(card, value: () => Plane()?.DisplayName ?? string.Empty);
+            Text(card, "Plane name", () => Plane()?.Name ?? string.Empty,
+                value => EditPlane(plane => plane.Name = string.IsNullOrWhiteSpace(value) ? null : value.Trim()));
+            ImagePicker(card, "Plane mask", () => Plane()?.Mask, path => EditPlane(plane => plane.Mask = path ?? string.Empty),
+                ".png", ".tif", ".tiff", ".jpg", ".jpeg", ".fits", ".fit", ".fts", ".xisf");
+            Number(card, "Plane distance (pc)", () => Plane()?.DistanceParsecs ?? 1,
+                value => EditPlane(plane => plane.DistanceParsecs = value), 1, step: 10);
+            Button(card, "Remove Plane", () => Session.Edit(c =>
+            {
+                c.Scene.Planes?.RemoveAll(plane => plane.Id == id);
+                if (c.Scene.Planes is { Count: 0 }) c.Scene.Planes = null;
+            }));
+        }
 
         StackPanel catalogues = Section("Catalogues and solving");
         Note(catalogues, value: () => string.IsNullOrWhiteSpace(Session.CatalogDirectoryPath)
@@ -480,7 +534,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
     // these change, which happens only after a preparation or an edit here.
     private (IReadOnlyList<ParallaxPlane> Planes, IReadOnlyList<string> Others) PlaneRows()
     {
-        IReadOnlyList<ParallaxPlane> planes = Composition.Scene.AutoPlanes ? Session.ScenePlanes ?? [] : [];
+        IReadOnlyList<ParallaxPlane> planes = Composition.Scene.AutoPlanes || Composition.Scene.Planes is { Count: > 0 } ? Session.ScenePlanes ?? [] : [];
         List<string> others = (Composition.Scene.DistanceOverrides ?? []).Select(given => given.ObjectName)
             .Where(name => !planes.Any(plane => ParallaxSceneSettings.SameObject(plane.ObjectName, name))).ToList();
         return (planes, others);
@@ -578,10 +632,16 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             Text(stop, "On-screen title", () => SelectedStop()?.Title ?? string.Empty,
                 value => Session.EditStop(s => s.Title = string.IsNullOrWhiteSpace(value) ? null : value));
             Note(stop, "Shown during this stop when Show stop titles is enabled. Leave blank for no title.");
+            ImagePicker(stop, "Title card", () => SelectedStop()?.Card, path => Session.EditStop(s => s.Card = path));
+            Note(stop, "An image with transparency shown during this stop in place of its title, whether or not titles are shown. Make it the video's size for sharp lettering.");
             Button(stop, "Pick Destination", BeginPickDestination);
             Button(stop, "Use Whole Image", () => Session.EditStop(s =>
-            { s.Focus = null; s.Name = "Whole Image"; s.Dolly = 0; s.Zoom = 1; s.Pan = 0; }));
+            { s.Focus = null; s.Name = "Whole Image"; s.Dolly = 0; s.Zoom = 1; s.Pan = 0; s.DepthParsecs = null; }));
             DestinationCoordinates(stop);
+            OptionalDistance(stop, "Set target plane distance", "Target depth (pc)", () => SelectedStop()?.DepthParsecs,
+                value => Session.EditStop(s => s.DepthParsecs = value),
+                Session.Summary?.BackgroundDistanceParsecs ?? Composition.Scene.DistanceParsecs ?? 400);
+            Note(stop, "Leave off to use the depth plane under this point. A given depth centres this stop on that physical distance; it does not move the scene's planes.");
             Number(stop, "Travel to stop (s)", () => SelectedStop()?.Travel ?? 0,
                 value => Session.EditStop(s => s.Travel = value), 0, 600, 0.1, () => Session.SelectedIndex > 0);
             Number(stop, "Hold (s)", () => SelectedStop()?.Hold ?? 0,
@@ -679,11 +739,40 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         StackPanel credit = Section("Credit");
         Toggle(credit, "Show credit", () => Composition.CreditEnabled, value => Session.Edit(c => c.CreditEnabled = value));
         Text(credit, "Credit text", () => Composition.Credit, value => Session.Edit(c => c.Credit = value), () => Composition.CreditEnabled);
+        ImagePicker(credit, "Logo", () => Composition.WatermarkImage, path => Session.Edit(c => c.WatermarkImage = path));
+        Number(credit, "Logo size", () => Composition.WatermarkSize, value => Session.Edit(c => c.WatermarkSize = value),
+            0.01, 1, 0.01, () => Composition.WatermarkImage is not null);
+        Note(credit, "The logo's height as a share of the frame's shorter side; it is at most a third of the frame's width. With credit text, it sits just inside the text.");
+        Choice(credit, "Corner", () => Composition.WatermarkCorner, value => Session.Edit(c => c.WatermarkCorner = value),
+            ("bottomRight", "Bottom right"), ("bottomLeft", "Bottom left"), ("topRight", "Top right"), ("topLeft", "Top left"));
+        Number(credit, "Opacity", () => Composition.WatermarkOpacity, value => Session.Edit(c => c.WatermarkOpacity = value),
+            0, 1, 0.05);
+        Note(credit, "The corner and opacity apply to the credit text and the logo alike.");
+
+        StackPanel cards = Section("Title cards");
+        ImagePicker(cards, "Opening card", () => Composition.IntroCard, path => Session.Edit(c => c.IntroCard = path));
+        ImagePicker(cards, "Closing card", () => Composition.OutroCard, path => Session.Edit(c => c.OutroCard = path));
+        Number(cards, "Card seconds", () => Composition.CardSeconds, value => Session.Edit(c => c.CardSeconds = value),
+            0.1, 600, 0.5);
+        Note(cards, "Images with transparency, fitted inside the frame and centred: make them the video's size for sharp lettering. The opening card shows from the first frame and fades out; the closing card fades in for the end. A looping tour shows both across its join, so it still loops. A tour stop can carry a card of its own.");
     }
 
     private void BuildOutputInspector()
     {
         StackPanel output = Section("Video");
+        Choice(output, "Output format", () => Session.ExportFormat, value => Session.ExportFormat = value,
+            (ParallaxExportFormat.Mp4, "MP4 (native Windows)"), (ParallaxExportFormat.Mov, "MOV (FFmpeg)"),
+            (ParallaxExportFormat.Matroska, "Matroska / MKV (FFmpeg)"), (ParallaxExportFormat.PngSequence, "PNG sequence"));
+        if (Session.ExportFormat is ParallaxExportFormat.Mov or ParallaxExportFormat.Matroska)
+        {
+            ImagePicker(output, "FFmpeg executable", () => Session.FfmpegPath, path => Session.FfmpegPath = path, ".exe");
+            Note(output, "Optional FFmpeg is required for MOV/MKV. Select an installed ffmpeg.exe, or leave unset to search PATH. Seiza does not download or bundle it.");
+        }
+        if (Session.ExportFormat == ParallaxExportFormat.PngSequence)
+        {
+            Text(output, "New sequence folder name", () => _sequenceFolderName, value => _sequenceFolderName = value);
+            Note(output, "Choose a parent folder when exporting. A new sequence folder is created only after every frame succeeds; existing folders are never replaced.");
+        }
         StackPanel sizes = ButtonRow(output);
         foreach ((string name, int width, int height) in new[]
         {
@@ -703,7 +792,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         Note(output, "At least 1. Stars swell by the square root of the capped growth: 4 allows twice their original size.");
         Number(output, "Fade stars from growth", () => Composition.FadeFrom, value => Session.Edit(c => c.FadeFrom = value), 0, step: 0.1);
         Note(output, "Stars start fading at this growth and disappear at twice it.");
-        Note(output, "MP4 · SDR · silent\nPreview uses a smaller frame. Export renders every frame at the selected resolution. Hardware encoding is allowed when available; HEVC support depends on installed Windows codecs.");
+        Note(output, "SDR · silent\nPreview uses a smaller frame. Export renders every frame at the selected resolution. MP4 uses Windows encoding; HEVC support depends on installed Windows codecs. PNG frames are lossless and ignore the video codec.");
     }
 
     private void BuildStopStrip()
@@ -778,7 +867,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
     {
         double[] point = (Composition.Motion == ParallaxMotion.Tour ? SelectedStop()?.Focus : Composition.Focus)?.ToArray() ?? Center();
         point[axis] = value;
-        if (Composition.Motion == ParallaxMotion.Tour) Session.EditStop(stop => { stop.Focus = point; stop.Name = "Custom Point"; });
+        if (Composition.Motion == ParallaxMotion.Tour) Session.EditStop(stop => { stop.Focus = point; stop.Name = "Custom Point"; stop.DepthParsecs = null; });
         else Session.Edit(c => { c.Focus = point; c.FocusName = "Custom Point"; });
     }
 
@@ -873,6 +962,13 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         return !_textCommitters.TryGetValue(input, out Func<bool>? commit) || commit();
     }
 
+    private static bool IsDescendant(DependencyObject element, DependencyObject ancestor)
+    {
+        for (DependencyObject? parent = element; parent is not null; parent = VisualTreeHelper.GetParent(parent))
+            if (ReferenceEquals(parent, ancestor)) return true;
+        return false;
+    }
+
     private bool CommitNumber(NumberBox number, TextBox input)
     {
         if (_refreshing || _closed || Session.IsBusy) return true;
@@ -941,7 +1037,53 @@ public sealed partial class ParallaxWindow : Window, IDisposable
     {
         string name = Path.GetFileNameWithoutExtension(Session.SourceName) + "-dust";
         if (await PickSaveAsync(name, "16-bit PNG", ".png", ("16-bit TIFF", ".tif"), ("32-bit FITS", ".fits"), ("32-bit XISF", ".xisf")) is { } path)
-            await Session.ExportDustMapAsync(path);
+            await Session.ExportDustMapAsync(path, Session.ExportCountedDustMap);
+    }
+
+    private async Task EditDustMapAsync()
+    {
+        if (ContentRoot.XamlRoot is not { } root || Session.SourceImage is not { } source) return;
+        ParallaxDustEditResult? map = await Session.ReadDustMapForEditingAsync();
+        if (_closed || map is null) return;
+        ParallaxDustEditResult? edited = await ParallaxDustEditorDialog.EditAsync(root, source, map.Opacity, map.Width, map.Height);
+        if (!_closed && edited is not null) await Session.ApplyPaintedDustMapAsync(edited.Opacity, edited.Width, edited.Height);
+    }
+
+    private async Task AddDepthPlaneAsync()
+    {
+        if (await PickFileAsync(".png", ".tif", ".tiff", ".jpg", ".jpeg", ".fits", ".fit", ".fts", ".xisf") is not { } path) return;
+        Session.Edit(c => (c.Scene.Planes ??= []).Add(new ParallaxDepthPlane
+        {
+            Mask = path, DistanceParsecs = c.Scene.DistanceParsecs ?? Session.Summary?.BackgroundDistanceParsecs ?? 400,
+        }));
+    }
+
+    private async Task AddObjectDistanceAsync()
+    {
+        if (_editDialog is not null || ContentRoot.XamlRoot is not { } root) return;
+        var name = new TextBox { Header = "Catalog object name", PlaceholderText = "For example, Sh2-170" };
+        var distance = new NumberBox { Header = "Distance (pc)", Value = 400, Minimum = 1,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact };
+        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Colors.Orange) };
+        var panel = new StackPanel { Spacing = 12, MinWidth = 320 };
+        panel.Children.Add(name); panel.Children.Add(distance); panel.Children.Add(error);
+        var dialog = new ContentDialog { XamlRoot = root, Title = "Object distance", Content = panel,
+            PrimaryButtonText = "Add or Replace", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary };
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            // NumberBox's own focus-loss parse can lag the dialog button.
+            if (FocusManager.GetFocusedElement(root) is TextBox input && IsDescendant(input, distance) && !CommitNumber(distance, input))
+            { args.Cancel = true; return; }
+            if (string.IsNullOrWhiteSpace(name.Text) || !double.IsFinite(distance.Value) || distance.Value <= 0)
+            { error.Text = "Enter a catalog object name and a positive, finite distance."; args.Cancel = true; }
+        };
+        _editDialog = dialog;
+        try
+        {
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary && !_closed)
+                Session.SetDistanceOverride(name.Text.Trim(), distance.Value);
+        }
+        finally { _editDialog = null; }
     }
 
     private async Task ChooseObjectFolderAsync()
@@ -974,13 +1116,39 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         await RunAsync(async () =>
         {
             string name = Path.GetFileNameWithoutExtension(Session.SourceName) + "-parallax";
-            if (await PickSaveAsync(name, "MP4 video", ".mp4") is { } path) await Session.ExportVideoAsync(path);
+            if (Session.ExportFormat == ParallaxExportFormat.PngSequence)
+            {
+                string folderName = _sequenceFolderName.Trim();
+                if (string.IsNullOrWhiteSpace(folderName) || folderName is "." or ".." ||
+                    folderName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || folderName.EndsWith('.') || folderName.EndsWith(' '))
+                    throw new InvalidDataException("Choose a valid new sequence folder name, without a path.");
+                var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.VideosLibrary };
+                picker.FileTypeFilter.Add("*");
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, WindowHandle);
+                StorageFolder? parent = await picker.PickSingleFolderAsync();
+                if (!_closed && parent is not null) await Session.ExportVideoAsync(Path.Combine(parent.Path, folderName));
+            }
+            else
+            {
+                (string description, string extension) = Session.ExportFormat switch
+                {
+                    ParallaxExportFormat.Mov => ("MOV video", ".mov"),
+                    ParallaxExportFormat.Matroska => ("Matroska video", ".mkv"),
+                    _ => ("MP4 video", ".mp4"),
+                };
+                if (await PickSaveAsync(name, description, extension) is { } path) await Session.ExportVideoAsync(path);
+            }
         });
     }
 
     private async void ShowVideo_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
         if (Session.ExportedPath is not { } path) return;
+        if (Directory.Exists(path))
+        {
+            await Launcher.LaunchFolderAsync(await StorageFolder.GetFolderFromPathAsync(path));
+            return;
+        }
         StorageFile file = await StorageFile.GetFileFromPathAsync(path);
         StorageFolder folder = await file.GetParentAsync();
         var options = new FolderLauncherOptions();

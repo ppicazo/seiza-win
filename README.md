@@ -82,8 +82,8 @@ own. These controls are newer than the downloadable 0.8.1 release.
 
 See the [Windows parallax guide](docs/PARALLAX-VIDEO.md) for layer requirements,
 camera and tour controls, encoder availability and export limits. Current
-`main` builds use published Seiza 0.29.1, stacking 0.31.0, parallax 0.6.1 and
-image-io 0.4.0 crates, without vendored patches.
+`main` builds use published Seiza 0.30.1, stacking 0.32.0, parallax 0.7.0 and
+image-io 0.5.0 crates, without vendored patches.
 
 ## Image viewing and folder review
 

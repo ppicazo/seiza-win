@@ -182,16 +182,91 @@ public sealed class ParallaxModelTests
         Assert.Empty(older.Planes);
     }
 
+    private const string PlannedJson = """{"schemaVersion":1,"focus":[100,80],"focusName":"Target","seconds":7,"tour":[{"name":"Whole Image","travel":0,"hold":1},{"name":"Sh2-170","focus":[90,70],"dolly":0.88,"zoom":3.2,"pan":0.12,"travel":5,"hold":2,"title":"Sh2-170","depthParsecs":2790}]}""";
+
     [Fact]
-    public void APlannedStopOnADepthPlaneTakesThePlaneUnderItsPoint()
+    public void APlannedStopOnADepthPlanePreservesItsExplicitDepth()
     {
-        // The planner gives a stop on a plane its depth. The app leaves it out,
-        // so the stop centres on whatever plane the scene shows at its point.
+        // Keep the planner's explicit depth; the user can clear it to centre
+        // on whatever plane the scene currently shows at the stop's point.
         const string json = """{"schemaVersion":1,"focus":[100,80],"focusName":"Target","seconds":7,"tour":[{"name":"Whole Image","travel":0,"hold":1},{"name":"Sh2-170","focus":[90,70],"dolly":0.88,"zoom":3.2,"pan":0.12,"travel":5,"hold":2,"title":"Sh2-170","depthParsecs":2790}]}""";
         ParallaxTourPlan plan = ParallaxTourPlan.FromJson(json);
         Assert.Equal(0.12, plan.Tour[1].Pan);
+        Assert.Equal(2790, plan.Tour[1].DepthParsecs);
         using var saved = JsonDocument.Parse(plan.ToJson());
-        Assert.False(saved.RootElement.GetProperty("tour")[1].TryGetProperty("depthParsecs", out _));
+        Assert.Equal(2790, saved.RootElement.GetProperty("tour")[1].GetProperty("depthParsecs").GetDouble());
+    }
+
+    [Fact]
+    public void ACatalogueTourMovesTheDistanceReferenceAndDropsItsStopsDepths()
+    {
+        // Planned from the catalogue alone, a stop's depth may name a plane the
+        // scene never lifts: applied, the stop centres on whatever plane the
+        // scene shows at its point, and the scene's distance is taken at the
+        // plan's focus.
+        ParallaxTourPlan plan = ParallaxTourPlan.FromJson(PlannedJson);
+        Assert.False(plan.PlannedOnScene);
+        var composition = new ParallaxComposition();
+        composition.Scene.DistanceFocus = [10, 20]; composition.DistanceName = "Mine";
+        composition.ApplyTour(plan);
+        Assert.Equal(ParallaxMotion.Tour, composition.Motion);
+        Assert.Equal(0.12, composition.Stops[1].Pan);
+        Assert.Null(composition.Stops[1].DepthParsecs);
+        Assert.Equal(new double[] { 100, 80 }, composition.Scene.DistanceFocus);
+        Assert.Equal("Target", composition.DistanceName);
+        using var sent = JsonDocument.Parse(composition.VideoSettings(false).ToJson());
+        Assert.False(sent.RootElement.GetProperty("tour")[1].TryGetProperty("depthParsecs", out _));
+    }
+
+    [Fact]
+    public void ATourPlannedOnTheSceneKeepsItsDistanceReferenceAndDepths()
+    {
+        // The prepared scene keeps the distance it was prepared with; moving
+        // the reference to the plan's focus would throw that scene away.
+        ParallaxTourPlan plan = ParallaxTourPlan.FromJson(PlannedJson);
+        plan.PlannedOnScene = true;
+        var composition = new ParallaxComposition();
+        composition.Scene.DistanceFocus = [10, 20]; composition.DistanceName = "Mine";
+        ParallaxSceneSettings scene = composition.Scene.DeepClone();
+        composition.ApplyTour(plan);
+        Assert.True(composition.Scene.ContentEquals(scene));
+        Assert.Equal("Mine", composition.DistanceName);
+        Assert.Equal(2790, composition.Stops[1].DepthParsecs);
+        Assert.Null(composition.ValidationMessage);
+        using var sent = JsonDocument.Parse(composition.VideoSettings(false).ToJson());
+        Assert.Equal(2790, sent.RootElement.GetProperty("tour")[1].GetProperty("depthParsecs").GetDouble());
+        // The plan itself is left as it came.
+        Assert.Equal(2790, plan.Tour[1].DepthParsecs);
+        composition.Stops[1].DepthParsecs = -1;
+        Assert.NotNull(composition.ValidationMessage);
+    }
+
+    [Fact]
+    public void PlanningOnTheSceneSendsTheFrameAndTheTourOptions()
+    {
+        Assert.Equal("""{"size":"1920x1080","autoTour":{"targets":4,"hold":2,"motion":0.5}}""",
+            ParallaxJson.SerializeSceneTourSettings("1920x1080", new() { Targets = 4, Hold = 2, Motion = 0.5 }));
+        // No count plans every target worth a visit.
+        Assert.Equal("""{"size":"1080x1920","autoTour":{"hold":1.5,"motion":1}}""",
+            ParallaxJson.SerializeSceneTourSettings("1080x1920", new() { Targets = null }));
+        // The session asks for the full output frame, not the preview's.
+        Assert.Equal("3840x2160", new ParallaxComposition { Width = 3840, Height = 2160 }.VideoSettings(false).Size);
+    }
+
+    [Fact]
+    public void ApplyingAFileItineraryKeepsItsAuthoredDepthsAndMovesTheDistanceReference()
+    {
+        ParallaxTourPlan plan = ParallaxTourPlan.FromJson(PlannedJson, Path.Combine(Path.GetTempPath(), "tour.json"));
+        Assert.False(plan.PlannedOnScene);
+        Assert.True(plan.PreserveStopDepths);
+        var composition = new ParallaxComposition();
+        composition.ApplyTour(plan);
+        Assert.Equal(2790, composition.Stops[1].DepthParsecs);
+        Assert.Equal(plan.Focus, composition.Scene.DistanceFocus);
+        Assert.Equal("Target", composition.DistanceName);
+        using var saved = JsonDocument.Parse(plan.ToJson());
+        Assert.False(saved.RootElement.TryGetProperty("preserveStopDepths", out _));
+        Assert.False(saved.RootElement.TryGetProperty("plannedOnScene", out _));
     }
 
     [Fact]
@@ -207,6 +282,105 @@ public sealed class ParallaxModelTests
         composition.CreditEnabled = true;
         using var enabled = JsonDocument.Parse(composition.VideoSettings(false).ToJson());
         Assert.Equal(composition.Credit, enabled.RootElement.GetProperty("watermark").GetString());
+    }
+
+    [Fact]
+    public void TheWatermarkStaysPlainUntilALogoOrPlacementIsSet()
+    {
+        var composition = new ParallaxComposition { CreditEnabled = true };
+        JsonElement Watermark()
+        {
+            using var document = JsonDocument.Parse(composition.VideoSettings(false).ToJson());
+            return document.RootElement.GetProperty("watermark").Clone();
+        }
+        Assert.Equal(composition.Credit, Watermark().GetString());
+        // A logo, or a corner or opacity of the user's, sends the object form.
+        composition.WatermarkImage = @"C:\Logos\seiza.png";
+        composition.WatermarkCorner = "topLeft";
+        JsonElement styled = Watermark();
+        Assert.Equal(composition.Credit, styled.GetProperty("text").GetString());
+        Assert.Equal(@"C:\Logos\seiza.png", styled.GetProperty("image").GetString());
+        Assert.Equal("topLeft", styled.GetProperty("corner").GetString());
+        Assert.Equal(0.06, styled.GetProperty("size").GetDouble());
+        Assert.Equal(0.8, styled.GetProperty("opacity").GetDouble());
+        // A logo without credit text sends no text.
+        composition.CreditEnabled = false;
+        Assert.False(Watermark().TryGetProperty("text", out _));
+        composition.WatermarkImage = null;
+        composition.WatermarkCorner = "bottomRight";
+        Assert.Equal(JsonValueKind.False, Watermark().ValueKind);
+        composition.WatermarkOpacity = 0.5;
+        Assert.Equal(0.5, Watermark().GetProperty("opacity").GetDouble());
+        // The object form reads back as written.
+        ParallaxVideoSettings read = JsonSerializer.Deserialize(
+            """{"watermark":{"text":true,"image":"logo.png","corner":"bottomLeft","size":0.1,"opacity":1}}""",
+            ParallaxJsonContext.Default.ParallaxVideoSettings)!;
+        Assert.Equal(new ParallaxWatermark("Rendered with seiza.fyi") { Image = "logo.png", Corner = "bottomLeft", Size = 0.1, Opacity = 1 },
+            read.Watermark);
+    }
+
+    [Fact]
+    public void TitleCardsAndAStopsCardGoToTheCoreAndSavedTours()
+    {
+        var composition = new ParallaxComposition { Motion = ParallaxMotion.Tour };
+        using (var plain = JsonDocument.Parse(composition.VideoSettings(false).ToJson()))
+        {
+            Assert.False(plain.RootElement.TryGetProperty("introCard", out _));
+            Assert.False(plain.RootElement.TryGetProperty("outroCard", out _));
+            Assert.Equal(3, plain.RootElement.GetProperty("cardSeconds").GetDouble());
+            Assert.False(plain.RootElement.GetProperty("tour")[1].TryGetProperty("card", out _));
+        }
+        composition.IntroCard = "opening.png";
+        composition.OutroCard = "closing.png";
+        composition.CardSeconds = 4;
+        composition.Stops[1].Card = "stop.png";
+        using (var carded = JsonDocument.Parse(composition.VideoSettings(true).ToJson()))
+        {
+            Assert.Equal("opening.png", carded.RootElement.GetProperty("introCard").GetString());
+            Assert.Equal("closing.png", carded.RootElement.GetProperty("outroCard").GetString());
+            Assert.Equal(4, carded.RootElement.GetProperty("cardSeconds").GetDouble());
+            Assert.Equal("stop.png", carded.RootElement.GetProperty("tour")[1].GetProperty("card").GetString());
+        }
+        var plan = new ParallaxTourPlan { Focus = [20, 30], FocusName = "Scene", Seconds = composition.Duration, Tour = composition.Stops };
+        Assert.Equal("stop.png", ParallaxTourPlan.FromJson(plan.ToJson()).Tour[1].Card);
+        // A copy of the draft keeps the card apart from the original.
+        ParallaxComposition copy = composition.DeepClone();
+        copy.Stops[1].Card = null;
+        Assert.Equal("stop.png", composition.Stops[1].Card);
+    }
+
+    [Theory]
+    [InlineData(0.0, 0.8, 3.0, "bottomRight")]
+    [InlineData(1.5, 0.8, 3.0, "bottomRight")]
+    [InlineData(0.06, -0.1, 3.0, "bottomRight")]
+    [InlineData(0.06, 0.8, 0.0, "bottomRight")]
+    [InlineData(0.06, 0.8, 3.0, "middle")]
+    [InlineData(double.NaN, 0.8, 3.0, "bottomRight")]
+    public void ValidationRejectsBadWatermarkAndCardSettings(double size, double opacity, double seconds, string corner)
+    {
+        var composition = new ParallaxComposition();
+        Assert.Null(composition.ValidationMessage);
+        composition.WatermarkSize = size; composition.WatermarkOpacity = opacity;
+        composition.CardSeconds = seconds; composition.WatermarkCorner = corner;
+        Assert.Contains("watermark", composition.ValidationMessage);
+    }
+
+    [Fact]
+    public void TheFitNamesAStopFlownLessFar()
+    {
+        // The core always sends the move's own values; the reader leaves a
+        // missing one null.
+        const string json = """{"schemaVersion":1,"frames":12,"fit":{"zoom":{"asked":1,"used":1},"pan":{"asked":0,"used":0},"lead":{"asked":1,"used":1},"truck":{"asked":0,"used":0},"inside":true,"stops":[{"zoom":{"asked":1,"used":1},"pan":{"asked":0,"used":0},"dolly":{"asked":0,"used":0}},{"zoom":{"asked":3.2,"used":3.99},"pan":{"asked":0.12,"used":0.66},"dolly":{"asked":0.88,"used":0.34}}]}}""";
+        ParallaxSummary summary = JsonSerializer.Deserialize(json, ParallaxJsonContext.Default.ParallaxSummary)!;
+        Assert.Equal(0.34, summary.Fit.Stops[1].Dolly!.Used);
+        Assert.Contains("Stop 2 dolly: 0.88 → 0.34", summary.Fit.Adjustments);
+        Assert.DoesNotContain(summary.Fit.Adjustments, line => line.StartsWith("Stop 1", StringComparison.Ordinal));
+        // An older core gives no dolly.
+        ParallaxSummary older = JsonSerializer.Deserialize(
+            """{"schemaVersion":1,"frames":12,"fit":{"zoom":{"asked":1,"used":1},"pan":{"asked":0,"used":0},"lead":{"asked":1,"used":1},"truck":{"asked":0,"used":0},"inside":true,"stops":[{"zoom":{"asked":1,"used":1.5},"pan":{"asked":0,"used":0}}]}}""",
+            ParallaxJsonContext.Default.ParallaxSummary)!;
+        Assert.Null(older.Fit.Stops[0].Dolly);
+        Assert.Equal("Stop 1 zoom: 1.00 → 1.50", Assert.Single(older.Fit.Adjustments));
     }
 
     [Theory]

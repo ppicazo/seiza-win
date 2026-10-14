@@ -38,6 +38,15 @@ internal static class ParallaxJson
         if (path is not null) writer.WriteString("path", path);
     });
 
+    // {"size": "WIDTHxHEIGHT", "autoTour": {targets, hold, motion}} for a tour
+    // planned on a prepared scene.
+    internal static string SerializeSceneTourSettings(string size, ParallaxTourOptions options) => WriteObject(writer =>
+    {
+        writer.WriteString("size", size);
+        writer.WritePropertyName("autoTour");
+        JsonSerializer.Serialize(writer, options, ParallaxJsonContext.Default.ParallaxTourOptions);
+    });
+
     internal static string SerializeDustMapWrite(string path, bool counted) => WriteObject(writer =>
     {
         writer.WriteString("path", path);
@@ -75,20 +84,55 @@ internal static class ParallaxJson
     }
 }
 
+// The core takes false, true, the text, or {text, image, corner, size, opacity}.
 internal sealed class ParallaxWatermarkConverter : JsonConverter<ParallaxWatermark>
 {
-    public override ParallaxWatermark Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => reader.TokenType switch
+    private const string DefaultText = "Rendered with seiza.fyi";
+
+    public override ParallaxWatermark Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        JsonTokenType.False or JsonTokenType.Null => ParallaxWatermark.Disabled,
-        JsonTokenType.True => ParallaxWatermark.FromText("Rendered with seiza.fyi"),
-        JsonTokenType.String => ParallaxWatermark.FromText(reader.GetString()!),
-        _ => throw new JsonException("A watermark must be false or text."),
+        if (reader.TokenType != JsonTokenType.StartObject) return new(Text(ref reader));
+        var watermark = ParallaxWatermark.Disabled;
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+        {
+            string name = reader.GetString() ?? string.Empty;
+            reader.Read();
+            watermark = name switch
+            {
+                "text" => watermark with { Text = Text(ref reader) },
+                "image" => watermark with { Image = reader.TokenType == JsonTokenType.Null ? null : reader.GetString() },
+                "corner" => watermark with { Corner = reader.GetString() ?? ParallaxWatermark.DefaultCorner },
+                "size" => watermark with { Size = reader.GetDouble() },
+                "opacity" => watermark with { Opacity = reader.GetDouble() },
+                _ => throw new JsonException($"A watermark has no {name} field."),
+            };
+        }
+        return watermark;
+    }
+
+    private static string? Text(ref Utf8JsonReader reader) => reader.TokenType switch
+    {
+        JsonTokenType.False or JsonTokenType.Null => null,
+        JsonTokenType.True => DefaultText,
+        JsonTokenType.String => reader.GetString(),
+        _ => throw new JsonException("A watermark must be false, text or an object."),
     };
 
     public override void Write(Utf8JsonWriter writer, ParallaxWatermark value, JsonSerializerOptions options)
     {
-        if (value.Text is null) writer.WriteBooleanValue(false);
-        else writer.WriteStringValue(value.Text);
+        if (value.Plain)
+        {
+            if (value.Text is null) writer.WriteBooleanValue(false);
+            else writer.WriteStringValue(value.Text);
+            return;
+        }
+        writer.WriteStartObject();
+        if (value.Text is not null) writer.WriteString("text", value.Text);
+        if (value.Image is not null) writer.WriteString("image", value.Image);
+        writer.WriteString("corner", value.Corner);
+        writer.WriteNumber("size", value.Size);
+        writer.WriteNumber("opacity", value.Opacity);
+        writer.WriteEndObject();
     }
 }
 
