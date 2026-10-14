@@ -35,6 +35,7 @@
     <Compile Include="..\..\src\Seiza.App\Services\ParallaxVideoExporter.cs" Link="Services\ParallaxVideoExporter.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ParallaxVideoExporter.Native.cs" Link="Services\ParallaxVideoExporter.Native.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ParallaxCore.cs" Link="Services\ParallaxCore.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\ParallaxInputPaths.cs" Link="Services\ParallaxInputPaths.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ParallaxDustMapOutput.cs" Link="Services\ParallaxDustMapOutput.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\WindowsFileIdentity.cs" Link="Services\WindowsFileIdentity.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\SeizaCoreException.cs" Link="Services\SeizaCoreException.cs" />

@@ -283,7 +283,9 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public async Task ExportDustMapAsync(string path)
     {
         if (!CanExportDustMap || (_preview ?? _scene) is not { } video) return;
-        string?[] protectedPaths = [_sourcePath, _starlessSourcePath, _starsSourcePath, SnapshotPath, _starless, _stars, .. _inputs.Values];
+        string?[] protectedPaths = [_sourcePath, _starlessSourcePath, _starsSourcePath, SnapshotPath, _starless, _stars,
+            .. _inputs.Values, .. ParallaxInputPaths.FromComposition(Composition),
+            .. (_scene?.ProtectedPaths ?? []), .. video.ProtectedPaths];
         bool resumeRefit = _preview is null || _refitRequested || IsReconfiguring;
         var (signal, generation) = Begin("Exporting the dust map…");
         try
@@ -291,8 +293,9 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
             string destination = ParallaxDustMapOutput.ValidateDestination(path, protectedPaths);
             // The native writer has no cancellation parameter: keep this job
             // tracked and await its completion before releasing session files.
-            // WriteDustMap checks cancellation before atomic publication.
-            bool written = await Task.Run(() => video.WriteDustMap(destination, cancellationToken: signal.Token));
+            // Carry draft-only inputs into the writer's final alias check too,
+            // not just this preflight, before atomically publishing the file.
+            bool written = await Task.Run(() => video.WriteDustMap(destination, protectedPaths, cancellationToken: signal.Token));
             signal.Token.ThrowIfCancellationRequested();
             if (_closed || generation != _revision) throw new OperationCanceledException(signal.Token);
             Status = written ? $"Dust map written to {Path.GetFileName(destination)}." : "This scene has no dust to export: dust dimming is off, or too few stars show to map it.";
@@ -447,7 +450,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         try
         {
             if (new FileInfo(path).Length > 4 * 1024 * 1024) throw new InvalidDataException("The tour JSON exceeds the 4 MiB limit.");
-            var plan = ParallaxTourPlan.FromJson(await File.ReadAllTextAsync(path));
+            var plan = ParallaxTourPlan.FromJson(await File.ReadAllTextAsync(path), path);
             Candidate = plan; Status = "Tour loaded. Apply it to replace the current draft.";
         }
         catch (Exception e) { Error = e.Message; }
@@ -460,7 +463,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
             if (Composition.ValidationMessage is string error) throw new InvalidDataException(error);
             var plan = new ParallaxTourPlan { Focus = Composition.Scene.DistanceFocus ?? [(Width - 1) / 2.0, (Height - 1) / 2.0], FocusName = Composition.DistanceName, Seconds = Composition.Duration, Tour = Composition.Stops, TourGlide = Composition.TourGlide, TourTitles = Composition.TourTitles, TourLoop = Composition.TourLoop };
             string stage = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, ".seiza-tour-" + Guid.NewGuid().ToString("N") + ".json");
-            try { await File.WriteAllTextAsync(stage, plan.ToJson()); File.Move(stage, path, true); }
+            try { await File.WriteAllTextAsync(stage, plan.ToJson(path)); File.Move(stage, path, true); }
             finally { File.Delete(stage); }
         }
         catch (Exception e) { Error = e.Message; }

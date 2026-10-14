@@ -48,6 +48,38 @@ public sealed record ParallaxTourPlan
     public string ToJson() => ParallaxJson.SerializePlan(this);
     public static ParallaxTourPlan FromJson(string json) => ParallaxJson.DeserializePlan(json);
 
+    // File itineraries carry cards beside the tour, not beside the running
+    // executable. Keep the context-free overloads for the native planning API.
+    public static ParallaxTourPlan FromJson(string json, string itineraryPath)
+    {
+        string folder = ItineraryFolder(itineraryPath);
+        return FromJson(json).WithCardPaths(card => Path.IsPathFullyQualified(card) ? card : Path.GetFullPath(card, folder));
+    }
+
+    public string ToJson(string itineraryPath)
+    {
+        string folder = ItineraryFolder(itineraryPath);
+        return WithCardPaths(card =>
+        {
+            // Keep external drive/UNC assets rooted; only assets carried in the
+            // tour's own folder become portable relative paths. A relative
+            // draft path still means the current working directory until saved.
+            string absolute = Path.IsPathFullyQualified(card) ? card : Path.GetFullPath(card);
+            string relative = Path.GetRelativePath(folder, absolute);
+            return Path.IsPathRooted(relative) || relative == ".." ||
+                relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? absolute :
+                relative.Replace(Path.DirectorySeparatorChar, '/');
+        }).ToJson();
+    }
+
+    private static string ItineraryFolder(string itineraryPath) => Path.GetDirectoryName(Path.GetFullPath(itineraryPath))!;
+
+    private ParallaxTourPlan WithCardPaths(Func<string, string> map) => this with
+    {
+        Focus = Focus.ToArray(),
+        Tour = Tour.Select(stop => stop.DeepClone() with { Card = stop.Card is null ? null : map(stop.Card) }).ToList(),
+    };
+
     public void Validate()
     {
         if (SchemaVersion != 1 || !ParallaxComposition.ValidPoint(Focus) || Focus.Length != 2 || Tour is null || Tour.Count < 2)

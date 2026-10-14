@@ -39,7 +39,8 @@ internal static class ParallaxCore
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
-        string[] protectedPaths = CaptureInputPaths(request.Inputs);
+        string[] protectedPaths = ParallaxInputPaths.Capture(
+            [.. ParallaxInputPaths.FromInputs(request.Inputs), .. ParallaxInputPaths.FromVideo(request.Video)]);
         using var scope = new EventScope(events, cancellationToken);
         nint result = NativeMethods.PrepareParallaxJson(request.ToJson(), scope.Signal, &ReceiveEvent, scope.Context, out nint error);
         return FinishVideo(result, error, scope, protectedPaths);
@@ -48,10 +49,13 @@ internal static class ParallaxCore
     public static unsafe ParallaxVideo Reconfigure(ParallaxVideo video, ParallaxVideoSettings settings, IProgress<ParallaxEvent>? events = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(video);
+        ArgumentNullException.ThrowIfNull(settings);
         cancellationToken.ThrowIfCancellationRequested();
+        string[] protectedPaths = ParallaxInputPaths.Capture(
+            [.. video.ProtectedPaths, .. ParallaxInputPaths.FromVideo(settings)]);
         using var scope = new EventScope(events, cancellationToken);
         nint result = NativeMethods.ReconfigureParallaxJson(video.Handle, settings.ToJson(), scope.Signal, &ReceiveEvent, scope.Context, out nint error);
-        return FinishVideo(result, error, scope, video.ProtectedPaths);
+        return FinishVideo(result, error, scope, protectedPaths);
     }
 
     // A new video of the same scene and camera with the dust map at `path`
@@ -81,13 +85,6 @@ internal static class ParallaxCore
             result = NativeMethods.WithParallaxDustMap(video.Handle, values, checked((uint)width), checked((uint)height), scope.Signal, &ReceiveEvent, scope.Context, out error);
         return FinishVideo(result, error, scope, video.ProtectedPaths);
     }
-
-    private static string[] CaptureInputPaths(ParallaxInputs inputs) =>
-        new[] { inputs.Image, inputs.Starless, inputs.Stars, inputs.DustMap, inputs.Objects,
-            inputs.ObjectDistances, inputs.StarDistances, inputs.GaiaCache, inputs.RcAstroExecutable }
-        .Where(path => !string.IsNullOrWhiteSpace(path))
-        .Select(path => LiveStackPath.NormalizeForComparison(path!))
-        .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
     private static ParallaxVideo FinishVideo(nint result, nint error, EventScope scope, IReadOnlyList<string> protectedPaths)
     {
@@ -228,7 +225,12 @@ internal sealed class ParallaxVideo : IDisposable
     // names: 16-bit PNG or TIFF, or 32-bit float FITS or XISF, the size of
     // the image. False when there is no such dust to write.
     public bool WriteDustMap(string path, bool counted = false, CancellationToken cancellationToken = default) =>
-        ParallaxDustMapOutput.Write(path, ProtectedPaths, staging => WriteDustMapFile(staging, counted), cancellationToken);
+        WriteDustMap(path, [], counted, cancellationToken);
+
+    internal bool WriteDustMap(string path, IEnumerable<string?> additionalProtectedPaths,
+        bool counted = false, CancellationToken cancellationToken = default) =>
+        ParallaxDustMapOutput.Write(path, ParallaxInputPaths.Capture([.. ProtectedPaths, .. additionalProtectedPaths]),
+            staging => WriteDustMapFile(staging, counted), cancellationToken);
 
     private bool WriteDustMapFile(string path, bool counted)
     {
