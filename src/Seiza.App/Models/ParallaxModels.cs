@@ -20,6 +20,13 @@ public sealed record ParallaxStop
     public double SpinDegrees { get; set; }
     public double Push { get; set; }
     public string? Title { get; set; }
+    // An image shown during this stop in place of its title, whether or not
+    // titles are shown: a title card with its transparency kept.
+    public string? Card { get; set; }
+    // Null centres the stop on the plane currently under its focus. A given
+    // depth preserves imported/planned framing in parsecs; moving the point
+    // drops it so the new point uses its own plane unless explicitly overridden.
+    public double? DepthParsecs { get; set; }
     [JsonIgnore] public string DisplayName => Name ?? (Focus is null ? "Whole Image" : "Custom Point");
     public ParallaxStop DeepClone() => this with { Focus = Focus?.ToArray() };
 }
@@ -42,8 +49,47 @@ public sealed record ParallaxTourPlan
     public double? TourGlide { get; set; }
     public bool? TourTitles { get; set; }
     public bool? TourLoop { get; set; }
+    // Planned on the prepared scene, whose depths its stops carry, rather than
+    // from the catalogue alone.
+    [JsonIgnore] public bool PlannedOnScene { get; set; }
+    // File itineraries may explicitly author a target depth even when they
+    // were not generated on this currently prepared scene.
+    [JsonIgnore] public bool PreserveStopDepths { get; set; }
     public string ToJson() => ParallaxJson.SerializePlan(this);
     public static ParallaxTourPlan FromJson(string json) => ParallaxJson.DeserializePlan(json);
+
+    // File itineraries carry cards beside the tour, not beside the running
+    // executable. Keep the context-free overloads for the native planning API.
+    public static ParallaxTourPlan FromJson(string json, string itineraryPath)
+    {
+        string folder = ItineraryFolder(itineraryPath);
+        return FromJson(json).WithCardPaths(card => Path.IsPathFullyQualified(card) ? card : Path.GetFullPath(card, folder))
+            with { PreserveStopDepths = true };
+    }
+
+    public string ToJson(string itineraryPath)
+    {
+        string folder = ItineraryFolder(itineraryPath);
+        return WithCardPaths(card =>
+        {
+            // Keep external drive/UNC assets rooted; only assets carried in the
+            // tour's own folder become portable relative paths. A relative
+            // draft path still means the current working directory until saved.
+            string absolute = Path.IsPathFullyQualified(card) ? card : Path.GetFullPath(card);
+            string relative = Path.GetRelativePath(folder, absolute);
+            return Path.IsPathRooted(relative) || relative == ".." ||
+                relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? absolute :
+                relative.Replace(Path.DirectorySeparatorChar, '/');
+        }).ToJson();
+    }
+
+    private static string ItineraryFolder(string itineraryPath) => Path.GetDirectoryName(Path.GetFullPath(itineraryPath))!;
+
+    private ParallaxTourPlan WithCardPaths(Func<string, string> map) => this with
+    {
+        Focus = Focus.ToArray(),
+        Tour = Tour.Select(stop => stop.DeepClone() with { Card = stop.Card is null ? null : map(stop.Card) }).ToList(),
+    };
 
     public void Validate()
     {
@@ -78,10 +124,14 @@ public sealed record ParallaxSceneSettings
     // Distances given for catalogued objects, by name, in place of the
     // catalogue's, for the nebula's distance and its planes. Null when none.
     public List<ParallaxDistanceOverride>? DistanceOverrides { get; set; }
+    // Painted masks defining regions of the starless image at given depths.
+    // Null leaves the native default (no manually defined planes) unchanged.
+    public List<ParallaxDepthPlane>? Planes { get; set; }
     public ParallaxSceneSettings DeepClone() => this with
     {
         DistanceFocus = DistanceFocus?.ToArray(),
         DistanceOverrides = DistanceOverrides?.Select(given => given with { }).ToList(),
+        Planes = Planes?.Select(plane => plane with { }).ToList(),
     };
     public bool ContentEquals(ParallaxSceneSettings? other) => other is not null &&
         ParallaxJson.SerializeScene(this) == ParallaxJson.SerializeScene(other);
@@ -92,9 +142,17 @@ public sealed record ParallaxSceneSettings
     // Each object takes one distance: a new one replaces the old.
     public void SetDistanceOverride(string name, double parsecs)
     {
+        ArgumentNullException.ThrowIfNull(name);
         var given = new ParallaxDistanceOverride { ObjectName = name.Trim(), DistanceParsecs = parsecs };
         int index = DistanceOverrides?.FindIndex(old => SameObject(old.ObjectName, name)) ?? -1;
-        if (index >= 0) DistanceOverrides![index] = given;
+        if (index >= 0)
+        {
+            DistanceOverrides![index] = given;
+            // Repair duplicates from externally supplied drafts while keeping
+            // the first row's position stable for the inspector.
+            for (int i = DistanceOverrides.Count - 1; i > index; i--)
+                if (SameObject(DistanceOverrides[i].ObjectName, name)) DistanceOverrides.RemoveAt(i);
+        }
         else (DistanceOverrides ??= []).Add(given);
     }
 
@@ -115,6 +173,15 @@ public sealed record ParallaxDistanceOverride
     public double DistanceParsecs { get; set; }
 }
 
+public sealed record ParallaxDepthPlane
+{
+    [JsonIgnore] public Guid Id { get; set; } = Guid.NewGuid();
+    public string Mask { get; set; } = string.Empty;
+    public double DistanceParsecs { get; set; } = 400;
+    public string? Name { get; set; }
+    [JsonIgnore] public string DisplayName => string.IsNullOrWhiteSpace(Name) ? Path.GetFileNameWithoutExtension(Mask) : Name;
+}
+
 public sealed record ParallaxLabel
 {
     [JsonIgnore] public Guid Id { get; set; } = Guid.NewGuid();
@@ -124,11 +191,24 @@ public sealed record ParallaxLabel
     public string Text { get; set; } = "Label";
 }
 
+// The watermark: a line of text, an image such as a logo, or both, in one
+// corner. With no image and the corner, size and opacity at the core's
+// defaults it is sent as false or the text alone, as before images.
 [JsonConverter(typeof(ParallaxWatermarkConverter))]
 public sealed record ParallaxWatermark(string? Text)
 {
+    public const string DefaultCorner = "bottomRight";
+    public const double DefaultSize = 0.06;
+    public const double DefaultOpacity = 0.8;
+    public static readonly string[] Corners = ["bottomRight", "bottomLeft", "topRight", "topLeft"];
     public static ParallaxWatermark Disabled { get; } = new((string?)null);
     public static ParallaxWatermark FromText(string text) => new(text);
+    public string? Image { get; init; }
+    public string Corner { get; init; } = DefaultCorner;
+    // The image's height as a share of the frame's shorter side.
+    public double Size { get; init; } = DefaultSize;
+    public double Opacity { get; init; } = DefaultOpacity;
+    [JsonIgnore] public bool Plain => Image is null && Corner == DefaultCorner && Size == DefaultSize && Opacity == DefaultOpacity;
 }
 
 // Reconfigure takes COMPLETE camera/output settings; omitted fields take native
@@ -160,6 +240,10 @@ public sealed record ParallaxVideoSettings
     public List<ParallaxLabel> Labels { get; set; } = [];
     public string LabelColor { get; set; } = "#F0F4F8";
     public ParallaxWatermark Watermark { get; set; } = ParallaxWatermark.Disabled;
+    // Title cards over the start and the end, each shown for CardSeconds.
+    public string? IntroCard { get; set; }
+    public string? OutroCard { get; set; }
+    public double CardSeconds { get; set; } = 3;
     public string ToJson() => ParallaxJson.SerializeVideo(this);
 }
 
@@ -197,6 +281,16 @@ public sealed record ParallaxComposition
     public string LabelColor { get; set; } = "#F0F4F8";
     public bool CreditEnabled { get; set; }
     public string Credit { get; set; } = "Rendered with seiza.fyi";
+    // An image, such as a logo, in the credit's corner; the corner and opacity
+    // apply to the credit text as well.
+    public string? WatermarkImage { get; set; }
+    public string WatermarkCorner { get; set; } = ParallaxWatermark.DefaultCorner;
+    public double WatermarkSize { get; set; } = ParallaxWatermark.DefaultSize;
+    public double WatermarkOpacity { get; set; } = ParallaxWatermark.DefaultOpacity;
+    // Title cards: images with transparency over the start and the end.
+    public string? IntroCard { get; set; }
+    public string? OutroCard { get; set; }
+    public double CardSeconds { get; set; } = 3;
 
     public ParallaxComposition DeepClone() => this with
     {
@@ -226,6 +320,24 @@ public sealed record ParallaxComposition
     public double ArrivalAt(int index) => index < 0 || index >= Stops.Count ? 0 :
         Stops.Take(index).Sum(stop => stop.Hold) + Stops.Take(index + 1).Skip(1).Sum(stop => stop.Travel);
 
+    // Replace the draft's tour with `plan`. A tour planned from the catalogue
+    // alone also moves the distance reference to its focus, the target most
+    // worth a visit, and its stops centre on the planes the scene shows at
+    // their points. One planned on the prepared scene keeps the scene's
+    // distance reference, as moving it would prepare the scene again, and its
+    // stops keep the depths the scene gave them.
+    public void ApplyTour(ParallaxTourPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        Motion = ParallaxMotion.Tour;
+        Stops = plan.Tour.Select(stop => stop.DeepClone() with
+        {
+            DepthParsecs = plan.PlannedOnScene || plan.PreserveStopDepths ? stop.DepthParsecs : null,
+        }).ToList();
+        if (!plan.PlannedOnScene) { Scene.DistanceFocus = plan.Focus.ToArray(); DistanceName = plan.FocusName; }
+        TourGlide = plan.TourGlide ?? TourGlide; TourTitles = plan.TourTitles ?? TourTitles; TourLoop = plan.TourLoop ?? TourLoop;
+    }
+
     public void SetSpin(int index, bool clockwise)
     {
         if (index < 0 || index >= Stops.Count) return;
@@ -246,13 +358,18 @@ public sealed record ParallaxComposition
             if (Width is < 16 or > 3840 || Height is < 16 or > 3840 || Width % 2 != 0 || Height % 2 != 0 || Fps is not (24 or 30 or 60))
                 return "Choose even dimensions between 16 and 3840 pixels and 24, 30 or 60 fps.";
             if (Stops is null || Stops.Any(stop => stop is null) || Scene is null || Labels is null ||
-                Scene.DistanceOverrides?.Any(given => given is null || string.IsNullOrWhiteSpace(given.ObjectName)) == true)
+                Scene.DistanceOverrides?.Any(given => given is null || string.IsNullOrWhiteSpace(given.ObjectName)) == true ||
+                Scene.Planes?.Any(plane => plane is null || string.IsNullOrWhiteSpace(plane.Mask)) == true)
                 return "The composition is incomplete.";
             if (!double.IsFinite(Duration) || Duration <= 0 || Duration > 600) return "The video must be longer than zero and at most 10 minutes.";
             if (new[] { Scene.DistanceParsecs, Scene.UnmatchedDistanceParsecs }
                 .Concat(Scene.DistanceOverrides?.Select(given => (double?)given.DistanceParsecs) ?? [])
+                .Concat(Scene.Planes?.Select(plane => (double?)plane.DistanceParsecs) ?? [])
                 .Any(value => value is double distance && (!double.IsFinite(distance) || distance <= 0)))
                 return "Distances must be positive, finite parsec values.";
+            if (Scene.DistanceOverrides is { } overrides && overrides.Select(given => given.ObjectName.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count() != overrides.Count)
+                return "Each named object can have only one distance override.";
             if (!ValidPoint(Scene.DistanceFocus) || !double.IsFinite(Scene.GaiaMaxMagnitude) || Scene.GaiaMaxMagnitude is < 1 or > 25 ||
                 !double.IsFinite(Scene.DustOpacity) || Scene.DustOpacity < 0 || Scene.MaxStars is < 0 || Scene.SmallStars is not ("field" or "drop") ||
                 !double.IsFinite(Scene.MinimumScaleArcsecPerPixel) || !double.IsFinite(Scene.MaximumScaleArcsecPerPixel) ||
@@ -265,11 +382,15 @@ public sealed record ParallaxComposition
             if (!double.IsFinite(OverlayDensity) || OverlayDensity is < 0 or > 1 || !Regex.IsMatch(LabelColor ?? string.Empty, "^#[0-9a-fA-F]{6}$", RegexOptions.CultureInvariant) ||
                 Labels.Any(label => label is null || !Finite(label.X, label.Y, label.Radius) || label.Radius < 0 || string.IsNullOrEmpty(label.Text)))
                 return "Labels need valid positions, nonnegative radii and a color in #RRGGBB format.";
+            if (!Finite(WatermarkSize, WatermarkOpacity, CardSeconds) || WatermarkSize is <= 0 or > 1 ||
+                WatermarkOpacity is < 0 or > 1 || CardSeconds <= 0 || !ParallaxWatermark.Corners.Contains(WatermarkCorner))
+                return "Check the watermark's corner, size and opacity, and the title cards' seconds.";
             if (Motion == ParallaxMotion.Tour)
             {
                 if (Stops.Count < 2) return "A tour needs at least two stops.";
                 if (Stops.Any(stop => !ValidPoint(stop.Focus) || !Finite(stop.Dolly, stop.Pan, stop.Zoom, stop.RotateDegrees, stop.Travel, stop.Hold, stop.SpinDegrees, stop.Push) ||
-                    stop.Dolly is < 0 or >= 1 || stop.Pan is < 0 or > 1 || stop.Zoom <= 0 || stop.Push is < 0 or >= 1 || stop.Travel < 0 || stop.Hold < 0))
+                    stop.Dolly is < 0 or >= 1 || stop.Pan is < 0 or > 1 || stop.Zoom <= 0 || stop.Push is < 0 or >= 1 || stop.Travel < 0 || stop.Hold < 0 ||
+                    stop.DepthParsecs is double depth && (!double.IsFinite(depth) || depth <= 0)))
                     return "Every stop needs valid framing, spin, push and nonnegative times.";
             }
             return null;
@@ -300,7 +421,11 @@ public sealed record ParallaxComposition
             TourTitles = Motion == ParallaxMotion.Tour && TourTitles, TourLoop = Motion == ParallaxMotion.Tour && TourLoop,
             Seconds = Duration, Fps = Fps, Size = FormattableString.Invariant($"{width}x{height}"), Overlay = Overlay,
             OverlayDensity = OverlayDensity, Labels = Labels.Select(label => label with { }).ToList(), LabelColor = LabelColor,
-            Watermark = CreditEnabled ? ParallaxWatermark.FromText(Credit) : ParallaxWatermark.Disabled,
+            Watermark = new ParallaxWatermark(CreditEnabled ? Credit : null)
+            {
+                Image = WatermarkImage, Corner = WatermarkCorner, Size = WatermarkSize, Opacity = WatermarkOpacity,
+            },
+            IntroCard = IntroCard, OutroCard = OutroCard, CardSeconds = CardSeconds,
         };
     }
 
@@ -346,6 +471,10 @@ public sealed record ParallaxStopFit
 {
     public ParallaxFitValue Zoom { get; init; } = new();
     public ParallaxFitValue Pan { get; init; } = new();
+    // How far the camera flew in. The fit flies a stop less far, zooming in to
+    // keep its target's size, where it would show much of the smooth fill
+    // behind a depth plane. Null from a core too old to say.
+    public ParallaxFitValue? Dolly { get; init; }
 }
 public sealed record ParallaxFit
 {
@@ -366,7 +495,11 @@ public sealed record ParallaxFit
                 if (value.Changed) result.Add(string.Create(CultureInfo.InvariantCulture, $"{name}: {value.Asked:F2} → {value.Used:F2}"));
             }
             Add("Zoom", Zoom); Add("Pan", Pan); Add("Sideways lead", Lead); Add("Sideways motion", Truck);
-            for (int i = 0; i < Stops.Length; i++) { Add($"Stop {i + 1} zoom", Stops[i].Zoom); Add($"Stop {i + 1} pan", Stops[i].Pan); }
+            for (int i = 0; i < Stops.Length; i++)
+            {
+                Add($"Stop {i + 1} zoom", Stops[i].Zoom); Add($"Stop {i + 1} pan", Stops[i].Pan);
+                if (Stops[i].Dolly is { } dolly) Add($"Stop {i + 1} dolly", dolly);
+            }
             return result;
         }
     }

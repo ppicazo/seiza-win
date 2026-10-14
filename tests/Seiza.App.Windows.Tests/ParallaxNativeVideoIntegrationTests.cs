@@ -17,6 +17,179 @@ namespace Seiza.App.Windows.Tests;
 
 public sealed class ParallaxNativeVideoIntegrationTests(ITestOutputHelper output)
 {
+    [Theory]
+    [InlineData("logo")]
+    [InlineData("opening")]
+    [InlineData("closing")]
+    [InlineData("stop")]
+    public void InitiallyPreparedArtworkCannotBeReplacedByDustExports(string kind)
+    {
+        using var fixture = new LayerFixture();
+        string artwork = CopyArtwork(fixture, kind + ".png");
+        SetArtwork(fixture.Request.Video, kind, artwork);
+        using ParallaxVideo video = PrepareDustBearingVideo(fixture.Request);
+
+        AssertArtworkProtected(video, artwork);
+        string normalizedAlias = Path.Combine(fixture.DirectoryPath, ".", Path.GetFileName(artwork));
+        Assert.Throws<SeizaCoreException>(() => video.WriteDustMap(normalizedAlias));
+        Assert.Empty(Directory.EnumerateFiles(fixture.DirectoryPath, ".seiza-dust-*"));
+    }
+
+    [Theory]
+    [InlineData("logo")]
+    [InlineData("opening")]
+    [InlineData("closing")]
+    [InlineData("stop")]
+    public void ReconfiguredAndClearedArtworkRemainsProtectedWithoutChangingOlderVideo(string kind)
+    {
+        using var fixture = new LayerFixture();
+        string originalArtwork = CopyArtwork(fixture, kind + "-original.png");
+        string addedArtwork = CopyArtwork(fixture, kind + "-refitted.png");
+        SetArtwork(fixture.Request.Video, kind, originalArtwork);
+        using ParallaxVideo original = PrepareDustBearingVideo(fixture.Request);
+        byte[] openingBefore = original.RenderBgraFrame(0);
+
+        ParallaxVideoSettings replacement = CloneVideoSettings(fixture.Request.Video);
+        SetArtwork(replacement, kind, addedArtwork);
+        using ParallaxVideo refitted = ParallaxCore.Reconfigure(original, replacement);
+        AssertArtworkProtected(refitted, originalArtwork);
+        AssertArtworkProtected(refitted, addedArtwork);
+
+        // Clearing or replacing the draft does not make the artwork used by
+        // an immutable retained video safe to overwrite.
+        ParallaxVideoSettings cleared = CloneVideoSettings(replacement);
+        SetArtwork(cleared, kind, null);
+        using ParallaxVideo withoutArtwork = ParallaxCore.Reconfigure(refitted, cleared);
+        AssertArtworkProtected(withoutArtwork, originalArtwork);
+        AssertArtworkProtected(withoutArtwork, addedArtwork);
+
+        AssertArtworkProtected(original, originalArtwork);
+        Assert.Equal(openingBefore, original.RenderBgraFrame(0));
+        Assert.DoesNotContain(addedArtwork, original.ProtectedPaths);
+        Assert.Empty(Directory.EnumerateFiles(fixture.DirectoryPath, ".seiza-dust-*"));
+    }
+
+    [Theory]
+    [InlineData("logo")]
+    [InlineData("opening")]
+    [InlineData("closing")]
+    [InlineData("stop")]
+    public void DraftOnlyArtworkIsProtectedBeforeThePreviewHasRefitted(string kind)
+    {
+        using var fixture = new LayerFixture();
+        using ParallaxVideo video = PrepareDustBearingVideo(fixture.Request);
+        string artwork = CopyArtwork(fixture, kind + "-draft.png");
+        var draft = new ParallaxComposition { Motion = ParallaxMotion.FlyIn };
+        SetCompositionArtwork(draft, kind, artwork);
+        byte[] before = File.ReadAllBytes(artwork);
+
+        // The Session can export dust from the old scene while artwork edits
+        // are still awaiting a refit, including an inactive tour's stop card.
+        Assert.DoesNotContain(artwork, video.ProtectedPaths);
+        Assert.Throws<SeizaCoreException>(() => video.WriteDustMap(artwork, ParallaxInputPaths.FromComposition(draft)));
+        Assert.Equal(before, File.ReadAllBytes(artwork));
+        Assert.Empty(Directory.EnumerateFiles(fixture.DirectoryPath, ".seiza-dust-*"));
+    }
+
+    [Theory]
+    [InlineData("logo")]
+    [InlineData("opening")]
+    [InlineData("closing")]
+    [InlineData("stop")]
+    public void ArtworkHardLinkAliasesAreRejectedByTheNativeExportGuard(string kind)
+    {
+        using var fixture = new LayerFixture();
+        string artwork = CopyArtwork(fixture, kind + ".png");
+        string alias = Path.Combine(fixture.DirectoryPath, kind + "-alias.png");
+        SetArtwork(fixture.Request.Video, kind, artwork);
+        using ParallaxVideo video = PrepareDustBearingVideo(fixture.Request);
+        byte[] before = File.ReadAllBytes(artwork);
+        Assert.True(CreateHardLink(alias, artwork, 0), $"CreateHardLink failed: {Marshal.GetLastWin32Error()}");
+
+        Assert.Throws<SeizaCoreException>(() => video.WriteDustMap(alias));
+        Assert.Equal(before, File.ReadAllBytes(artwork));
+        Assert.Equal(before, File.ReadAllBytes(alias));
+        Assert.Empty(Directory.EnumerateFiles(fixture.DirectoryPath, ".seiza-dust-*"));
+    }
+
+    [Fact]
+    public void DraftArtworkAliasesIntroducedDuringStagingAreRejectedBeforePublication()
+    {
+        using var fixture = new LayerFixture();
+        using ParallaxVideo video = PrepareDustBearingVideo(fixture.Request);
+        string artwork = CopyArtwork(fixture, "draft-logo.png");
+        var draft = new ParallaxComposition { WatermarkImage = artwork };
+        string[] protectedPaths = ParallaxInputPaths.Capture(video.ProtectedPaths.Concat(ParallaxInputPaths.FromComposition(draft)));
+        string destination = Path.Combine(fixture.DirectoryPath, "output.png");
+        byte[] before = File.ReadAllBytes(artwork);
+
+        Assert.Throws<SeizaCoreException>(() => ParallaxDustMapOutput.Write(destination, protectedPaths, staging =>
+        {
+            File.WriteAllBytes(staging, [9, 8, 7, 6]);
+            Assert.True(CreateHardLink(destination, artwork, 0), $"CreateHardLink failed: {Marshal.GetLastWin32Error()}");
+            return true;
+        }, CancellationToken.None));
+        Assert.Equal(before, File.ReadAllBytes(artwork));
+        Assert.Equal(before, File.ReadAllBytes(destination));
+        Assert.Empty(Directory.EnumerateFiles(fixture.DirectoryPath, ".seiza-dust-*"));
+    }
+
+    private static string CopyArtwork(LayerFixture fixture, string name)
+    {
+        string artwork = Path.Combine(fixture.DirectoryPath, name);
+        File.Copy(fixture.Request.Inputs.Starless!, artwork);
+        return artwork;
+    }
+
+    private static ParallaxVideo PrepareDustBearingVideo(ParallaxRequest request)
+    {
+        using ParallaxVideo original = ParallaxCore.Prepare(request);
+        // Force a writable dust map so an unguarded path would genuinely be
+        // replaced, not merely return false because the fixture has no dust.
+        return ParallaxCore.WithDustMap(original, Enumerable.Repeat(1f, 48 * 32).ToArray(), 48, 32);
+    }
+
+    private static void AssertArtworkProtected(ParallaxVideo video, string artwork)
+    {
+        byte[] before = File.ReadAllBytes(artwork);
+        SeizaCoreException error = Assert.Throws<SeizaCoreException>(() => video.WriteDustMap(artwork));
+        Assert.Contains("must not overwrite", error.Message, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(artwork));
+    }
+
+    private static ParallaxVideoSettings CloneVideoSettings(ParallaxVideoSettings source) => source with
+    {
+        Tour = source.Tour.Select(stop => stop.DeepClone()).ToList(),
+    };
+
+    private static void SetArtwork(ParallaxVideoSettings video, string kind, string? path)
+    {
+        switch (kind)
+        {
+            case "logo": video.Watermark = video.Watermark with { Image = path }; break;
+            case "opening": video.IntroCard = path; break;
+            case "closing": video.OutroCard = path; break;
+            case "stop": video.Tour[1].Card = path; break;
+            default: throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+    }
+
+    private static void SetCompositionArtwork(ParallaxComposition composition, string kind, string? path)
+    {
+        switch (kind)
+        {
+            case "logo": composition.WatermarkImage = path; break;
+            case "opening": composition.IntroCard = path; break;
+            case "closing": composition.OutroCard = path; break;
+            case "stop": composition.Stops[1].Card = path; break;
+            default: throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLink(string newName, string existingName, nint securityAttributes);
+
     [Fact]
     public async Task OfflineNativeLayerSceneExportsAndDecodesAsSilentH264WithoutChangingSources()
     {
