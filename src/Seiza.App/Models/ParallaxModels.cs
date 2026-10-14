@@ -72,9 +72,47 @@ public sealed record ParallaxSceneSettings
     public double DustOpacity { get; set; } = 3;
     public double MinimumScaleArcsecPerPixel { get; set; } = 0.1;
     public double MaximumScaleArcsecPerPixel { get; set; } = 20;
-    public ParallaxSceneSettings DeepClone() => this with { DistanceFocus = DistanceFocus?.ToArray() };
+    // Catalogued nebulae and clouds of dust at distances of their own move on
+    // planes of their own. Left out when off, the core's default.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool AutoPlanes { get; set; }
+    // Distances given for catalogued objects, by name, in place of the
+    // catalogue's, for the nebula's distance and its planes. Null when none.
+    public List<ParallaxDistanceOverride>? DistanceOverrides { get; set; }
+    public ParallaxSceneSettings DeepClone() => this with
+    {
+        DistanceFocus = DistanceFocus?.ToArray(),
+        DistanceOverrides = DistanceOverrides?.Select(given => given with { }).ToList(),
+    };
     public bool ContentEquals(ParallaxSceneSettings? other) => other is not null &&
         ParallaxJson.SerializeScene(this) == ParallaxJson.SerializeScene(other);
+
+    public double? DistanceOverride(string name) =>
+        DistanceOverrides?.FirstOrDefault(given => SameObject(given.ObjectName, name))?.DistanceParsecs;
+
+    // Each object takes one distance: a new one replaces the old.
+    public void SetDistanceOverride(string name, double parsecs)
+    {
+        var given = new ParallaxDistanceOverride { ObjectName = name.Trim(), DistanceParsecs = parsecs };
+        int index = DistanceOverrides?.FindIndex(old => SameObject(old.ObjectName, name)) ?? -1;
+        if (index >= 0) DistanceOverrides![index] = given;
+        else (DistanceOverrides ??= []).Add(given);
+    }
+
+    public void RemoveDistanceOverride(string name)
+    {
+        DistanceOverrides?.RemoveAll(given => SameObject(given.ObjectName, name));
+        if (DistanceOverrides is { Count: 0 }) DistanceOverrides = null;
+    }
+
+    // The core finds objects by name whatever their case.
+    internal static bool SameObject(string? first, string? second) =>
+        string.Equals(first?.Trim(), second?.Trim(), StringComparison.OrdinalIgnoreCase);
+}
+
+public sealed record ParallaxDistanceOverride
+{
+    [JsonPropertyName("object")] public string ObjectName { get; set; } = string.Empty;
+    public double DistanceParsecs { get; set; }
 }
 
 public sealed record ParallaxLabel
@@ -207,9 +245,13 @@ public sealed record ParallaxComposition
         {
             if (Width is < 16 or > 3840 || Height is < 16 or > 3840 || Width % 2 != 0 || Height % 2 != 0 || Fps is not (24 or 30 or 60))
                 return "Choose even dimensions between 16 and 3840 pixels and 24, 30 or 60 fps.";
-            if (Stops is null || Stops.Any(stop => stop is null) || Scene is null || Labels is null) return "The composition is incomplete.";
+            if (Stops is null || Stops.Any(stop => stop is null) || Scene is null || Labels is null ||
+                Scene.DistanceOverrides?.Any(given => given is null || string.IsNullOrWhiteSpace(given.ObjectName)) == true)
+                return "The composition is incomplete.";
             if (!double.IsFinite(Duration) || Duration <= 0 || Duration > 600) return "The video must be longer than zero and at most 10 minutes.";
-            if (new[] { Scene.DistanceParsecs, Scene.UnmatchedDistanceParsecs }.Any(value => value is double distance && (!double.IsFinite(distance) || distance <= 0)))
+            if (new[] { Scene.DistanceParsecs, Scene.UnmatchedDistanceParsecs }
+                .Concat(Scene.DistanceOverrides?.Select(given => (double?)given.DistanceParsecs) ?? [])
+                .Any(value => value is double distance && (!double.IsFinite(distance) || distance <= 0)))
                 return "Distances must be positive, finite parsec values.";
             if (!ValidPoint(Scene.DistanceFocus) || !double.IsFinite(Scene.GaiaMaxMagnitude) || Scene.GaiaMaxMagnitude is < 1 or > 25 ||
                 !double.IsFinite(Scene.DustOpacity) || Scene.DustOpacity < 0 || Scene.MaxStars is < 0 || Scene.SmallStars is not ("field" or "drop") ||
@@ -347,6 +389,24 @@ public sealed record ParallaxSummary
     // how many stars its opaque places brought in front of the nebula.
     public bool DustGiven { get; init; }
     public int StarsInFrontOfDust { get; init; }
+    // The depth planes lifted. Empty when automatic planes are off, or from a
+    // core too old to say: the generated reader sets a missing init-only
+    // property to null.
+    public ParallaxPlane[] Planes { get => _planes; init => _planes = value ?? []; }
+    private readonly ParallaxPlane[] _planes = [];
+}
+// A depth plane: its distance and how it was found, the share of the image
+// it covers, whether it is a dark cloud that blocks light behind it, and the
+// catalogued object a given distance moves it by (null for a cloud of dust
+// the star counts alone place).
+public sealed record ParallaxPlane
+{
+    public string Name { get; init; } = string.Empty;
+    public double DistanceParsecs { get; init; }
+    public string Basis { get; init; } = string.Empty;
+    public double Coverage { get; init; }
+    public bool Absorbs { get; init; }
+    [JsonPropertyName("object")] public string? ObjectName { get; init; }
 }
 public sealed record ParallaxEvent
 {

@@ -75,10 +75,15 @@ the starless image.
 
 ![Native Windows camera controls with automatic tour generation, editable stops and a timeline preview](docs/images/parallax-tour-camera.jpg)
 
+Current `main` builds also offer **Automatic depth planes**: catalogued nebulae
+at different distances and foreground dust clouds move on planes of their own.
+Inspect the detected planes and give a catalogued object a distance of your
+own. These controls are newer than the downloadable 0.8.1 release.
+
 See the [Windows parallax guide](docs/PARALLAX-VIDEO.md) for layer requirements,
-camera and tour controls, encoder availability and export limits. The Windows
-app uses published Seiza 0.27.0, stacking 0.29.0, parallax 0.4.0 and image-io
-0.2.0 crates, without vendored patches.
+camera and tour controls, encoder availability and export limits. Current
+`main` builds use published Seiza 0.29.1, stacking 0.31.0, parallax 0.6.1 and
+image-io 0.4.0 crates, without vendored patches.
 
 ## Image viewing and folder review
 
@@ -107,8 +112,8 @@ RGB histograms, searchable source headers, and processing provenance.
   map. Camera edits are preserved when changing dust; cancelled or failed
   exports leave existing files and source images untouched.
 
-This version uses published Seiza 0.27.0, stacking 0.29.0, parallax 0.4.0 and
-image-io 0.2.0 crates, without vendored patches. See the
+The 0.8.1 release shipped with published Seiza 0.27.0, stacking 0.29.0,
+parallax 0.4.0 and image-io 0.2.0 crates, without vendored patches. See the
 [shared-reference guide](docs/STACKING-UPSTREAM.md) and
 [parallax guide](docs/PARALLAX-VIDEO.md).
 
