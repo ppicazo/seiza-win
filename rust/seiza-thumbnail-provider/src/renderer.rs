@@ -216,6 +216,54 @@ mod tests {
     }
 
     #[test]
+    fn renders_compressed_float_xisf_with_the_same_stretch_as_uncompressed() {
+        use seiza_fits::F32ImageData;
+        use seiza_xisf::{WriteCompression, WriteOptions, write_f32_image_to_with_options};
+
+        let pixels: Vec<_> = (0..128 * 64)
+            .map(|index| 100.0 + index as f32 / 100_000.0)
+            .collect();
+        let render = |compression| {
+            let mut bytes = Vec::new();
+            let options = WriteOptions {
+                compression,
+                ..Default::default()
+            };
+            write_f32_image_to_with_options(
+                &mut bytes,
+                128,
+                64,
+                F32ImageData::Mono(&pixels),
+                &[],
+                &options,
+            )
+            .expect("encode Float32 XISF fixture");
+            render_thumbnail(&bytes, 32).expect("render Float32 XISF thumbnail")
+        };
+        let uncompressed = render(None);
+        let compressed = render(Some(WriteCompression::recommended()));
+        assert_eq!(compressed, uncompressed);
+        assert_eq!((compressed.width, compressed.height), (32, 16));
+        let minimum = compressed
+            .bgra
+            .chunks_exact(4)
+            .map(|pixel| pixel[0])
+            .min()
+            .unwrap();
+        let maximum = compressed
+            .bgra
+            .chunks_exact(4)
+            .map(|pixel| pixel[0])
+            .max()
+            .unwrap();
+        assert!(
+            maximum - minimum > 100,
+            "low-contrast floats must be stretched"
+        );
+        assert!(compressed.bgra.chunks_exact(4).all(|pixel| pixel[3] == 255));
+    }
+
+    #[test]
     fn preview_fits_rectangular_bounds() {
         let preview = render_preview(&test_fits(400, 200), 160, 120).expect("render preview");
         assert_eq!((preview.width, preview.height), (160, 80));
