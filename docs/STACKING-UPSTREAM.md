@@ -11,7 +11,7 @@ Python and does not require another Windows API.
 
 ## Published core and capability detection
 
-Windows 0.8.2 ships with published `seiza-cabi`/`seiza` 0.30.1 and
+Windows 0.8.3 ships with published `seiza-cabi`/`seiza` 0.30.1 and
 `seiza-stacking` 0.32.0, which include #245, #246, and #247. Production Cargo
 manifests and the lockfile use registry dependencies only. Do not vendor or
 ship an unreleased Git/path override.
