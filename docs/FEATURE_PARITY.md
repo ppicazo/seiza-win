@@ -83,7 +83,7 @@ historical baseline above. It shipped in the 0.8.0 release on published
 `seiza-cabi 0.27.0` and `seiza-parallax 0.4.0`, including dust maps, with no
 vendored renderer or crate patch. Dust-map round trips, live camera edits,
 source protection, cancellation and safe workspace closure have additional
-automated coverage beyond that original parity audit. Windows 0.8.2 uses
+automated coverage beyond that original parity audit. Windows 0.8.3 uses
 published `seiza-cabi 0.30.1` and `seiza-parallax 0.7.0`, adding prepared-scene
 tour generation, custom plane masks/stop depths, painted dust, artwork and
 PNG/MOV/MKV output. Automated and actual-session validation does not imply a

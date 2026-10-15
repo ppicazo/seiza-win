@@ -8,8 +8,9 @@ a finished image into a camera tour with depth, motion, and titles. Seiza pairs
 a WinUI 3 interface and GPU-backed viewport with the shared
 [Seiza](https://github.com/theatrus/seiza) Rust imaging core.
 
-[Download Seiza for Windows 0.8.2 (x64)](https://github.com/theatrus/seiza-win/releases/download/v0.8.2/seiza-0.8.2-windows-x86_64.msi)
-· [Release notes and previous versions](https://github.com/theatrus/seiza-win/releases)
+[Download Seiza for Windows 0.8.3 (x64)](https://github.com/theatrus/seiza-win/releases/download/v0.8.3/seiza-0.8.3-windows-x86_64.msi)
+· [0.8.3 release notes](docs/releases/v0.8.3.md)
+· [Previous versions](https://github.com/theatrus/seiza-win/releases)
 
 **Also from Seiza:** [Core, CLI, and libraries](https://github.com/theatrus/seiza) ·
 [Seiza for Mac](https://github.com/theatrus/seiza-mac) ·
@@ -18,7 +19,7 @@ a WinUI 3 interface and GPU-backed viewport with the shared
 ## Features
 
 - **[Parallax videos and tours](#parallax-videos-and-tours)** — Turn an astrophoto into a depth-aware camera tour with painted dust and title cards, then export video or lossless PNG frames.
-- **[Image viewing and folder review](#image-viewing-and-folder-review)** — Open FITS, XISF, and raster images; browse a whole night with cached thumbnails and fast previews.
+- **[Image viewing and folder review](#image-viewing-and-folder-review)** — Browse nested capture folders with collapsible path, filter or file-type groups, cached thumbnails and fast previews.
 - **[Stretch and image processing](#stretch-and-image-processing)** — Build live stretch recipes, correct backgrounds, and apply light deconvolution.
 - **[Directory and live stacking](#directory-image-stacking)** — Align and combine selected frames or [watch a capture folder](#live-folder-stacking), with calibration, shared-reference alignment, and resumable sessions.
 - **[Plate solving and sky overlays](#plate-solving-and-sky-overlays)** — Solve locally, identify stars and deep-sky objects, and export WCS solutions.
@@ -85,7 +86,7 @@ or add a custom image-mask plane with an explicit name and distance.
 
 See the [Windows parallax guide](docs/PARALLAX-VIDEO.md) for layer requirements,
 camera and tour controls, encoder availability and export limits. Windows
-0.8.2 uses published Seiza 0.30.1, stacking 0.32.0, parallax 0.7.0 and
+0.8.3 uses published Seiza 0.30.1, stacking 0.32.0, parallax 0.7.0 and
 image-io 0.5.0 crates, without vendored patches.
 
 ## Image viewing and folder review
@@ -109,7 +110,29 @@ focuses its window, while additional file activations stay in the same Seiza
 process and open a new document window. Inspect image statistics, input/display
 RGB histograms, searchable source headers, and processing provenance.
 
-![Image thumbnails displayed in the directory sidebar](docs/images/directory-thumbnails.jpg)
+| Folder Path grouping | Filter grouping |
+| --- | --- |
+| ![Native sidebar with nested relative paths, collapsible groups and synthetic sample thumbnails](docs/images/nested-browser/folder-path.png) | ![Native sidebar grouping synthetic sample images by filename filter, with relative labels distinguishing same-named files](docs/images/nested-browser/filter.png) |
+
+Native sidebar controls shown with synthetic sample images.
+
+## Seiza for Windows 0.8.3: nested folders and grouped browsing
+
+- Open a capture tree at once, or turn **Include subfolders** off for just its
+  root folder. Group by **Folder Path**, **Filter**, **File type**, or **None**.
+- Collapse groups without losing the open image. Left/Right and Previous/Next
+  visit every image in grouped order, expanding the destination group as needed.
+  Regrouping or reopening the sidebar reveals the selected card without
+  resetting the document, solve, overlays or viewport.
+- Stack FITS/XISF frames from the entire opened tree, including collapsed
+  groups. Choose frames explicitly in the stacking dialog; relative paths
+  distinguish duplicate filenames in the frame and reference lists.
+- Keep directory scans cancellable and report skipped linked or unreadable
+  subfolders instead of recursing into descendant junctions.
+
+Filter groups use filename detection, not image headers; grouping choices are
+per-window. Native crate versions are unchanged from 0.8.2. See the
+[0.8.3 release notes](docs/releases/v0.8.3.md).
 
 ## Seiza for Windows 0.8.2: depth-aware tours, painted dust and more exports
 
@@ -406,8 +429,8 @@ remaining macOS and Windows integration work.
 
 ## Install
 
-Download the [Seiza for Windows 0.8.2 x64 MSI](https://github.com/theatrus/seiza-win/releases/download/v0.8.2/seiza-0.8.2-windows-x86_64.msi).
-Its [SHA-256 checksums](https://github.com/theatrus/seiza-win/releases/download/v0.8.2/SHA256SUMS.txt)
+Download the [Seiza for Windows 0.8.3 x64 MSI](https://github.com/theatrus/seiza-win/releases/download/v0.8.3/seiza-0.8.3-windows-x86_64.msi).
+Its [SHA-256 checksums](https://github.com/theatrus/seiza-win/releases/download/v0.8.3/SHA256SUMS.txt)
 are published beside it. The installer places Seiza in
 `Program Files\Seiza for Windows` for every user, adds a shared Start Menu
 shortcut, and registers `.fit`, `.fits`, `.fts`, and `.xisf` with Windows
@@ -472,7 +495,7 @@ Build the self-contained all-users WiX MSI:
 ```powershell
 dotnet build packaging\windows\Seiza.App.wixproj `
   -c Release `
-  -p:SeizaVersion=0.8.2
+  -p:SeizaVersion=0.8.3
 ```
 
 The installer is written to `dist`. See the
