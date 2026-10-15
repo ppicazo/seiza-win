@@ -4,13 +4,23 @@ using Seiza.App.Services;
 
 namespace Seiza.App.ViewModels;
 
-public partial class ImageBrowserItemViewModel(string path) : ObservableObject
+public partial class ImageBrowserItemViewModel(string path, string? browserRoot = null) : ObservableObject
 {
-    private int _loadState;
+    private Task? _thumbnailLoadTask;
 
     public string Path { get; } = path;
 
     public string FileName { get; } = System.IO.Path.GetFileName(path);
+
+    public string DisplayFolderPath { get; } = FolderLabel(path, browserRoot);
+
+    private static string FolderLabel(string path, string? root)
+    {
+        string folder = System.IO.Path.GetDirectoryName(path) ?? path;
+        if (root is null) return folder;
+        string relative = System.IO.Path.GetRelativePath(root, folder);
+        return relative == "." ? "(root)" : relative;
+    }
 
     [ObservableProperty]
     public partial BitmapImage? Thumbnail { get; private set; }
@@ -23,11 +33,22 @@ public partial class ImageBrowserItemViewModel(string path) : ObservableObject
 
     public async Task EnsureLoadedAsync(CancellationToken cancellationToken = default)
     {
-        if (Interlocked.CompareExchange(ref _loadState, 1, 0) != 0)
+        // Regrouping keeps this VM but cancels its old prefetch. A fresh caller
+        // must wait for that load to unwind and retry, not mistake it for a
+        // successfully cached thumbnail.
+        try
         {
-            return;
+            while (_thumbnailLoadTask is { } pending)
+            {
+                await pending.WaitAsync(cancellationToken);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
         }
+        catch (OperationCanceledException) { return; }
+        if (Thumbnail is not null || Failed) return;
 
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _thumbnailLoadTask = completion.Task;
         IsLoading = true;
         try
         {
@@ -47,7 +68,7 @@ public partial class ImageBrowserItemViewModel(string path) : ObservableObject
         }
         catch (OperationCanceledException)
         {
-            Interlocked.Exchange(ref _loadState, 0);
+            // The next caller can retry after the cancelled owner unwinds.
         }
         catch
         {
@@ -56,6 +77,8 @@ public partial class ImageBrowserItemViewModel(string path) : ObservableObject
         finally
         {
             IsLoading = false;
+            _thumbnailLoadTask = null;
+            completion.SetResult();
         }
     }
 }
