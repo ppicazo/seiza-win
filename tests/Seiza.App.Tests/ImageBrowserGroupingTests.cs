@@ -329,45 +329,67 @@ public sealed class ImageBrowserGroupingTests
 
     [Theory]
     [InlineData(0, -1, -1)]
-    [InlineData(0, 1, 2)]
+    [InlineData(0, 1, 1)]
     [InlineData(1, -1, 0)]
     [InlineData(1, 1, 2)]
-    [InlineData(2, -1, 0)]
-    [InlineData(2, 1, 4)]
+    [InlineData(2, -1, 1)]
+    [InlineData(2, 1, 3)]
     [InlineData(3, -1, 2)]
     [InlineData(3, 1, 4)]
-    [InlineData(4, -1, 2)]
+    [InlineData(4, -1, 3)]
     [InlineData(4, 1, -1)]
     [InlineData(-1, 1, 0)]
     [InlineData(-1, -1, 4)]
-    public void NavigationSkipsCollapsedItemsInBothDirections(int selected, int direction, int expected)
+    public void NavigationVisitsEveryItemInGroupedOrderInBothDirections(int selected, int direction, int expected)
     {
         string[] paths = ["a", "b", "c", "d", "e"];
-        HashSet<string> visible = new(StringComparer.OrdinalIgnoreCase) { "a", "c", "e" };
-        Assert.Equal(expected, ImageBrowserGroupingModel.FindAdjacentVisibleIndex(paths, visible, selected, direction));
+        Assert.Equal(expected, ImageBrowserGroupingModel.FindAdjacentIndex(paths, selected, direction));
     }
 
     [Fact]
-    public void AllCollapsedOrEmptyViewsHaveNoNavigationTarget()
+    public void EmptyCollectionsHaveNoNavigationTarget()
     {
-        string[] paths = ["a", "b", "c"];
-        HashSet<string> visible = [];
         foreach (int direction in new[] { -1, 1 })
         {
-            Assert.Equal(-1, ImageBrowserGroupingModel.FindAdjacentVisibleIndex(paths, visible, 1, direction));
-            Assert.Equal(-1, ImageBrowserGroupingModel.FindAdjacentVisibleIndex([], visible, -1, direction));
+            Assert.Equal(-1, ImageBrowserGroupingModel.FindAdjacentIndex([], -1, direction));
         }
+    }
+
+    [Theory]
+    [InlineData((int)ImageBrowserGrouping.Folder)]
+    [InlineData((int)ImageBrowserGrouping.Filter)]
+    [InlineData((int)ImageBrowserGrouping.FileType)]
+    [InlineData((int)ImageBrowserGrouping.None)]
+    public void NavigationTraversesTheEntireGroupingLayoutWithoutOmissions(int grouping)
+    {
+        ImageBrowserGroupingResult layout = Create(
+            [Image("z", "light_OIII_2.fits"), Image("light_Ha_1.fits"), Image("a", "light_Ha_1.fits"), Image("preview.png")],
+            (ImageBrowserGrouping)grouping);
+        List<string> forward = [];
+        for (int index = ImageBrowserGroupingModel.FindAdjacentIndex(layout.OrderedPaths, -1, 1); index >= 0;
+            index = ImageBrowserGroupingModel.FindAdjacentIndex(layout.OrderedPaths, index, 1))
+        {
+            forward.Add(layout.OrderedPaths[index]);
+        }
+        List<string> backward = [];
+        for (int index = ImageBrowserGroupingModel.FindAdjacentIndex(layout.OrderedPaths, -1, -1); index >= 0;
+            index = ImageBrowserGroupingModel.FindAdjacentIndex(layout.OrderedPaths, index, -1))
+        {
+            backward.Add(layout.OrderedPaths[index]);
+        }
+        Assert.Equal(layout.OrderedPaths, forward);
+        Assert.Equal(layout.OrderedPaths.Reverse(), backward);
+        Assert.Equal(4, forward.Count);
     }
 
     [Fact]
     public void NavigationRejectsInvalidDirectionAndSelection()
     {
         string[] paths = ["a"];
-        HashSet<string> visible = ["a"];
-        Assert.Throws<ArgumentOutOfRangeException>(() => ImageBrowserGroupingModel.FindAdjacentVisibleIndex(paths, visible, 0, 0));
-        Assert.Throws<ArgumentOutOfRangeException>(() => ImageBrowserGroupingModel.FindAdjacentVisibleIndex(paths, visible, 0, 2));
-        Assert.Throws<ArgumentOutOfRangeException>(() => ImageBrowserGroupingModel.FindAdjacentVisibleIndex(paths, visible, -2, 1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => ImageBrowserGroupingModel.FindAdjacentVisibleIndex(paths, visible, 1, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ImageBrowserGroupingModel.FindAdjacentIndex(paths, 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ImageBrowserGroupingModel.FindAdjacentIndex(paths, 0, 2));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ImageBrowserGroupingModel.FindAdjacentIndex(paths, -2, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ImageBrowserGroupingModel.FindAdjacentIndex(paths, 1, 1));
     }
 
     private static string Root { get; } = Path.Combine(Path.GetPathRoot(Path.GetFullPath("."))!, "image-browser-test-root");

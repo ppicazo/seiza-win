@@ -328,6 +328,7 @@ public sealed partial class MainPage : Page, IDisposable
         UpdateVisualState();
         if (_isBrowserOpen)
         {
+            RevealBrowserSelection();
             SyncBrowserSelection(scrollIntoView: true);
             _ = PrefetchThumbnailsAroundSelectionAsync();
         }
@@ -369,6 +370,7 @@ public sealed partial class MainPage : Page, IDisposable
         if (!_isScanningFolder && previous >= 0)
         {
             _selectedIndex = previous;
+            RevealBrowserSelection();
             UpdateNavigationState();
             await LoadImageAsync(
                 _imagePaths[_selectedIndex],
@@ -382,6 +384,7 @@ public sealed partial class MainPage : Page, IDisposable
         if (!_isScanningFolder && next >= 0)
         {
             _selectedIndex = next;
+            RevealBrowserSelection();
             UpdateNavigationState();
             await LoadImageAsync(
                 _imagePaths[_selectedIndex],
@@ -1547,14 +1550,9 @@ public sealed partial class MainPage : Page, IDisposable
     {
         ViewModel.CanNavigatePrevious = !_isScanningFolder && FindBrowserNavigationIndex(-1) >= 0;
         ViewModel.CanNavigateNext = !_isScanningFolder && FindBrowserNavigationIndex(1) >= 0;
-        bool selectedIsVisible = _selectedIndex >= 0 && _visibleBrowserPaths.Contains(_imagePaths[_selectedIndex]);
-        int visibleIndex = selectedIsVisible
-            ? _imagePaths.Take(_selectedIndex + 1).Count(_visibleBrowserPaths.Contains) : 0;
-        ViewModel.PositionText = selectedIsVisible && _visibleBrowserPaths.Count > 1
-            ? $"{visibleIndex:N0} of {_visibleBrowserPaths.Count:N0}"
-            : _visibleBrowserPaths.Count < _imagePaths.Count
-                ? $"{_visibleBrowserPaths.Count:N0} visible of {_imagePaths.Count:N0}"
-                : string.Empty;
+        ViewModel.PositionText = _imagePaths.Count > 1 && _selectedIndex >= 0
+            ? $"{_selectedIndex + 1:N0} of {_imagePaths.Count:N0}"
+            : string.Empty;
         SyncBrowserSelection(scrollIntoView: _isBrowserOpen);
     }
 
@@ -1590,20 +1588,16 @@ public sealed partial class MainPage : Page, IDisposable
             var indexes = new List<int>();
             if (_selectedIndex >= 0)
             {
-                if (_visibleBrowserPaths.Contains(_imagePaths[_selectedIndex])) indexes.Add(_selectedIndex);
-                int previous = _selectedIndex;
-                int next = _selectedIndex;
+                indexes.Add(_selectedIndex);
                 for (int distance = 1; distance <= 4; distance++)
                 {
-                    if (previous >= 0)
+                    if (_selectedIndex - distance >= 0)
                     {
-                        previous = ImageBrowserGroupingModel.FindAdjacentVisibleIndex(_imagePaths, _visibleBrowserPaths, previous, -1);
-                        if (previous >= 0) indexes.Add(previous);
+                        indexes.Add(_selectedIndex - distance);
                     }
-                    if (next >= 0)
+                    if (_selectedIndex + distance < BrowserItems.Count)
                     {
-                        next = ImageBrowserGroupingModel.FindAdjacentVisibleIndex(_imagePaths, _visibleBrowserPaths, next, 1);
-                        if (next >= 0) indexes.Add(next);
+                        indexes.Add(_selectedIndex + distance);
                     }
                 }
             }

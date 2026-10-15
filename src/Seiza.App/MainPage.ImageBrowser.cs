@@ -180,6 +180,7 @@ public sealed partial class MainPage
         }
         RebuildBrowserGroups(selectedPath);
         _isBrowserOpen = CanBrowseImages;
+        RevealBrowserSelection();
         UpdateNavigationState();
         UpdateVisualState();
     }
@@ -246,6 +247,7 @@ public sealed partial class MainPage
             _ => ImageBrowserGrouping.Folder,
         };
         RebuildBrowserGroups(selected);
+        RevealBrowserSelection();
         UpdateNavigationState();
         UpdateVisualState();
         _ = PrefetchThumbnailsAroundSelectionAsync();
@@ -280,8 +282,40 @@ public sealed partial class MainPage
             ? _imagePaths : _browserGroups.SelectMany(group => group).Select(item => item.Path));
     }
 
-    private int FindBrowserNavigationIndex(int direction) => ImageBrowserGroupingModel.FindAdjacentVisibleIndex(
-        _imagePaths, _visibleBrowserPaths, _selectedIndex, direction);
+    private int FindBrowserNavigationIndex(int direction) => ImageBrowserGroupingModel.FindAdjacentIndex(
+        _imagePaths, _selectedIndex, direction);
+
+    private void RevealBrowserSelection()
+    {
+        if (_selectedIndex < 0 || _selectedIndex >= BrowserItems.Count) return;
+        ImageBrowserItemViewModel selected = BrowserItems[_selectedIndex];
+        if (_visibleBrowserPaths.Contains(selected.Path)) return;
+        ImageBrowserGroupViewModel? group = _browserGroups.FirstOrDefault(candidate => candidate.ContainsImage(selected));
+        if (group is null) return;
+
+        bool wasSyncing = _syncingBrowserSelection;
+        _syncingBrowserSelection = true;
+        try
+        {
+            group.IsExpanded = true;
+            _collapsedBrowserGroups.Remove(group.Key);
+            RefreshBrowserVisibility();
+        }
+        finally
+        {
+            _syncingBrowserSelection = wasSyncing;
+        }
+        // Give newly expanded rows a layout pass before the final scroll. Rapid
+        // navigation or a new collection must not scroll to an obsolete target.
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_disposed && _isBrowserOpen && _selectedIndex >= 0 && _selectedIndex < BrowserItems.Count
+                && ReferenceEquals(BrowserItems[_selectedIndex], selected) && _visibleBrowserPaths.Contains(selected.Path))
+            {
+                ImageBrowserList.ScrollIntoView(selected);
+            }
+        });
+    }
 
     private async void BrowserSubfolders_Changed(object sender, RoutedEventArgs e)
     {

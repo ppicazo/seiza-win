@@ -28,6 +28,8 @@ public sealed class ImageBrowserGroupViewModel : ObservableCollection<ImageBrows
     public string ChevronGlyph => IsExpanded ? "\uE70D" : "\uE76C";
     public string ToggleActionText => $"{(IsExpanded ? "Collapse" : "Expand")} {HeaderText}";
 
+    internal bool ContainsImage(ImageBrowserItemViewModel item) => Array.IndexOf(_allItems, item) >= 0;
+
     public bool IsExpanded
     {
         get => _isExpanded;

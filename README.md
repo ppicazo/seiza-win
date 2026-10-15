@@ -96,7 +96,8 @@ naturally sorted image sets in a cached thumbnail rail without blocking the UI.
 (relative path), **Filter**, **File type**, or **None**, and turn **Include subfolders** off
 to review only the selected folder. Changing grouping keeps the selected image
 and its cached thumbnail. Group headers collapse and expand their thumbnails;
-Previous/Next and keyboard navigation skip collapsed groups in displayed order.
+Previous/Next and keyboard navigation visit every image in grouped order,
+automatically expanding a collapsed destination group and revealing its card.
 Filter grouping uses the stacker's filename detection, with unrecognized files
 under **Other**. Collapsing the current image's group does not close that image.
 Unreadable subfolders and linked folders are skipped with a count in the sidebar.

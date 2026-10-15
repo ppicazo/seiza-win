@@ -57,7 +57,10 @@ by full path, so same-named files in different folders remain distinct.
 Filter grouping reuses the stacker's filename classifier without decoding
 source files. Collapsible group headers retain their full counts and remain
 keyboard-focusable when empty. Expansion state is independent per grouping
-mode, and navigation skips hidden cards without closing the current document.
+mode. Navigation and thumbnail prefetch use the complete grouped order;
+changing selection, regrouping, or reopening the sidebar reveals the selected
+image by expanding its group. Collapsing a group does not filter navigation or
+close the current document. Deferred reveal scrolling rejects stale targets.
 Directory stacking uses every FITS/XISF path in the scanned collection,
 independent of display grouping, selection, or collapse state. The Include
 subfolders control defines recursive versus top-level scope. The stacking

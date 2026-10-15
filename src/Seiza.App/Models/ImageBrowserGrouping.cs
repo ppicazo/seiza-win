@@ -126,24 +126,18 @@ internal static class ImageBrowserGroupingModel
             Array.AsReadOnly(resultGroups.SelectMany(group => group.Paths).ToArray()));
     }
 
-    public static int FindAdjacentVisibleIndex(
+    public static int FindAdjacentIndex(
         IReadOnlyList<string> orderedPaths,
-        IReadOnlySet<string> visiblePaths,
         int selectedIndex,
         int direction)
     {
         ArgumentNullException.ThrowIfNull(orderedPaths);
-        ArgumentNullException.ThrowIfNull(visiblePaths);
         if (direction is not (-1 or 1)) throw new ArgumentOutOfRangeException(nameof(direction));
         if (selectedIndex < -1 || selectedIndex >= orderedPaths.Count)
             throw new ArgumentOutOfRangeException(nameof(selectedIndex));
 
         int start = selectedIndex < 0 ? (direction > 0 ? 0 : orderedPaths.Count - 1) : selectedIndex + direction;
-        for (int index = start; index >= 0 && index < orderedPaths.Count; index += direction)
-        {
-            if (visiblePaths.Contains(orderedPaths[index])) return index;
-        }
-        return -1;
+        return start >= 0 && start < orderedPaths.Count ? start : -1;
     }
 
     private static int ComparePaths(PathEntry left, PathEntry right)
