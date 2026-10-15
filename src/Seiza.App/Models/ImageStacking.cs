@@ -222,6 +222,20 @@ internal sealed class ImageStackCalibration
     }
 }
 
+internal static class ImageStackFrameLabel
+{
+    public static string DisplayName(string path, string? browserRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        if (string.IsNullOrWhiteSpace(browserRoot)) return Path.GetFileName(path);
+        string relative = Path.GetRelativePath(browserRoot, path);
+        bool outsideRoot = Path.IsPathRooted(relative) || relative == ".."
+            || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+            || relative.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal);
+        return outsideRoot ? Path.GetFullPath(path) : relative;
+    }
+}
+
 internal sealed record ImageFilenameFilter(string Id, string Title, string FilenameSuffix)
 {
     private static readonly Regex TokenSeparator = new(

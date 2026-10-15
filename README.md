@@ -92,6 +92,15 @@ image-io 0.5.0 crates, without vendored patches.
 
 Open FITS, XISF, PNG, JPEG, and TIFF images, folders, or dropped files. Browse
 naturally sorted image sets in a cached thumbnail rail without blocking the UI.
+**Open folder** includes nested subfolders. Group the sidebar by **Folder Path**
+(relative path), **Filter**, **File type**, or **None**, and turn **Include subfolders** off
+to review only the selected folder. Changing grouping keeps the selected image
+and its cached thumbnail. Group headers collapse and expand their thumbnails;
+Previous/Next and keyboard navigation visit every image in grouped order,
+automatically expanding a collapsed destination group and revealing its card.
+Filter grouping uses the stacker's filename detection, with unrecognized files
+under **Other**. Collapsing the current image's group does not close that image.
+Unreadable subfolders and linked folders are skipped with a count in the sidebar.
 Fit, pan, wheel-zoom, and pointer-anchored pinch-zoom a GPU-backed viewport;
 overlay geometry and labels stay registered to image pixels.
 
@@ -236,6 +245,10 @@ without a Windows restart.
 
 - Directory image stacking registers and combines selected FITS or XISF
   light frames into an unstretched 32-bit floating-point FITS image.
+  When **Include subfolders** is on, **Stack** offers FITS/XISF frames from the
+  entire opened tree, including collapsed groups. Turn it off to limit inputs
+  to the opened folder. Choose light frames in the stacking dialog; relative
+  paths distinguish same-named files in its frame and reference lists.
 - Stacks can be split automatically by filename filter, with an independent
   reference frame for each filter group. Global or local normalization,
   delta-sigma rejection, registration limits, and calibration match the macOS

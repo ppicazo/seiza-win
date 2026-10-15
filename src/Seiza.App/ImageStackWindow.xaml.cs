@@ -12,6 +12,7 @@ namespace Seiza.App;
 public sealed partial class ImageStackWindow : Window, IDisposable
 {
     private readonly IReadOnlyList<StackFrameChoice> _frames;
+    private readonly string? _browserRoot;
     private readonly Dictionary<string, string> _referencePaths = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string[]> _rankedReferencePaths = new(StringComparer.Ordinal);
     private readonly TaskCompletionSource<ImageStackBatchResult?> _completion = new(
@@ -29,9 +30,10 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     private string? _calibrationLibraryPath;
     private string? _alignmentReferencePath;
 
-    internal ImageStackWindow(IReadOnlyList<string> paths)
+    internal ImageStackWindow(IReadOnlyList<string> paths, string? browserRoot = null)
     {
         InitializeComponent();
+        _browserRoot = browserRoot;
         MinimumWeightBox.Value = new ImageStackOptions().MinimumWeight;
         SharedAlignmentToggle.IsEnabled = StackingCoreCapabilities.Current.SupportsReferenceImage;
         SharedAlignmentAvailabilityText.Text = StackingCoreCapabilities.Current.SupportsReferenceImage
@@ -47,7 +49,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         _frames = paths
             .Where(ImageFileService.IsStackableImage)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(path => new StackFrameChoice(path, Path.GetFileName(path)))
+            .Select(path => new StackFrameChoice(path, ImageStackFrameLabel.DisplayName(path, _browserRoot)))
             .ToArray();
         FrameList.ItemsSource = _frames;
         foreach (StackFrameChoice frame in _frames)
@@ -165,7 +167,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
             });
 
             StackFrameChoice[] choices = group.Inputs
-                .Select(path => new StackFrameChoice(path, Path.GetFileName(path)))
+                .Select(path => new StackFrameChoice(path, ImageStackFrameLabel.DisplayName(path, _browserRoot)))
                 .ToArray();
             var picker = new ComboBox
             {

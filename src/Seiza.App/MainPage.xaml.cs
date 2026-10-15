@@ -76,6 +76,7 @@ public sealed partial class MainPage : Page, IDisposable
     public MainPage()
     {
         InitializeComponent();
+        InitializeImageBrowser();
         ViewModel.PropertyChanged += (_, _) => UpdateVisualState();
         InspectorControl.SolveRequested += InspectorControl_SolveRequested;
         InspectorControl.ExportWcsRequested += InspectorControl_ExportWcsRequested;
@@ -135,13 +136,13 @@ public sealed partial class MainPage : Page, IDisposable
             return;
         }
 
-        string[] paths = _imagePaths.Where(ImageFileService.IsStackableImage).ToArray();
+        string[] paths = GetStackableBrowserPaths().ToArray();
         if (paths.Length < 2)
         {
             return;
         }
 
-        var window = new ImageStackWindow(paths);
+        var window = new ImageStackWindow(paths, _browserRoot);
         _stackWindow = window;
         UpdateVisualState();
         window.Activate();
@@ -318,7 +319,7 @@ public sealed partial class MainPage : Page, IDisposable
 
     private void ImageBrowser_Click(object sender, RoutedEventArgs e)
     {
-        if (BrowserItems.Count <= 1)
+        if (!CanBrowseImages)
         {
             return;
         }
@@ -327,6 +328,7 @@ public sealed partial class MainPage : Page, IDisposable
         UpdateVisualState();
         if (_isBrowserOpen)
         {
+            RevealBrowserSelection();
             SyncBrowserSelection(scrollIntoView: true);
             _ = PrefetchThumbnailsAroundSelectionAsync();
         }
@@ -336,14 +338,15 @@ public sealed partial class MainPage : Page, IDisposable
         object sender,
         SelectionChangedEventArgs e)
     {
-        if (_syncingBrowserSelection ||
-            ImageBrowserList.SelectedIndex < 0 ||
-            ImageBrowserList.SelectedIndex == _selectedIndex)
+        if (_syncingBrowserSelection || _disposed || _isScanningFolder ||
+            ImageBrowserList.SelectedItem is not ImageBrowserItemViewModel item)
         {
             return;
         }
 
-        _selectedIndex = ImageBrowserList.SelectedIndex;
+        int index = BrowserItems.IndexOf(item);
+        if (index < 0 || index == _selectedIndex) return;
+        _selectedIndex = index;
         UpdateNavigationState();
         await LoadImageAsync(
             _imagePaths[_selectedIndex],
@@ -363,9 +366,11 @@ public sealed partial class MainPage : Page, IDisposable
 
     private async void Previous_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedIndex > 0)
+        int previous = FindBrowserNavigationIndex(-1);
+        if (!_isScanningFolder && previous >= 0)
         {
-            _selectedIndex--;
+            _selectedIndex = previous;
+            RevealBrowserSelection();
             UpdateNavigationState();
             await LoadImageAsync(
                 _imagePaths[_selectedIndex],
@@ -375,9 +380,11 @@ public sealed partial class MainPage : Page, IDisposable
 
     private async void Next_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedIndex >= 0 && _selectedIndex < _imagePaths.Count - 1)
+        int next = FindBrowserNavigationIndex(1);
+        if (!_isScanningFolder && next >= 0)
         {
-            _selectedIndex++;
+            _selectedIndex = next;
+            RevealBrowserSelection();
             UpdateNavigationState();
             await LoadImageAsync(
                 _imagePaths[_selectedIndex],
@@ -1084,75 +1091,36 @@ public sealed partial class MainPage : Page, IDisposable
 
     private async Task OpenImageAndDiscoverSiblingsAsync(string path)
     {
-        IReadOnlyList<string> siblings = [path];
-        string? folder = Path.GetDirectoryName(path);
-        if (folder is not null)
-        {
-            try
-            {
-                siblings = await ImageFileService.GetImagesAsync(folder);
-            }
-            catch (Exception) when (!string.IsNullOrWhiteSpace(folder))
-            {
-                // The selected image is still usable if sibling enumeration is unavailable.
-            }
-        }
-
-        SetCollection(siblings.Count == 0 ? [path] : siblings, path);
-        await LoadImageAsync(path);
-    }
-
-    internal async Task OpenFolderAsync(string folderPath)
-    {
+        if (_disposed) return;
+        var cancellation = BeginBrowserDiscovery();
+        _isScanningFolder = false;
         try
         {
-            IReadOnlyList<string> paths = await ImageFileService.GetImagesAsync(folderPath);
-            if (paths.Count == 0)
+            IReadOnlyList<string> siblings = [path];
+            string? folder = Path.GetDirectoryName(path);
+            if (folder is not null)
             {
-                ViewModel.FailLoading("This folder does not contain a supported image.");
-                return;
+                try
+                {
+                    siblings = await ImageFileService.GetImagesAsync(folder, cancellation.Token);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    // The selected image is still usable if sibling enumeration is unavailable.
+                }
             }
-
-            SetCollection(paths, paths[0]);
-            await LoadImageAsync(paths[0]);
+            if (!IsCurrentBrowserDiscovery(cancellation)) return;
+            SetCollection(siblings.Count == 0 ? [path] : siblings, path, cancelDiscovery: false);
+            await LoadImageAsync(path);
         }
-        catch (Exception exception)
+        catch (OperationCanceledException)
         {
-            ViewModel.FailLoading(DescribeException(exception));
-        }
-    }
-
-    private void SetCollection(IReadOnlyList<string> paths, string selectedPath)
-    {
-        _thumbnailCancellation?.Cancel();
-        _thumbnailCancellation = null;
-        _imagePaths.Clear();
-        _imagePaths.AddRange(paths);
-        _selectedIndex = _imagePaths.FindIndex(path =>
-            string.Equals(path, selectedPath, StringComparison.OrdinalIgnoreCase));
-        if (_selectedIndex < 0 && _imagePaths.Count > 0)
-        {
-            _selectedIndex = 0;
-        }
-
-        _syncingBrowserSelection = true;
-        try
-        {
-            BrowserItems.Clear();
-            foreach (string path in _imagePaths)
-            {
-                BrowserItems.Add(new ImageBrowserItemViewModel(path));
-            }
-            ImageBrowserList.SelectedIndex = _selectedIndex;
+            // A newer document or folder superseded this discovery.
         }
         finally
         {
-            _syncingBrowserSelection = false;
+            FinishBrowserDiscovery(cancellation);
         }
-        _isBrowserOpen = BrowserItems.Count > 1;
-
-        UpdateNavigationState();
-        UpdateVisualState();
     }
 
     private async Task<bool> LoadImageAsync(
@@ -1160,6 +1128,7 @@ public sealed partial class MainPage : Page, IDisposable
         bool preserveSolution = false,
         FitsImageProcessingConfiguration? processingOverride = null)
     {
+        if (_disposed) return false;
         bool isNewImage = !string.Equals(path, _currentPath, StringComparison.OrdinalIgnoreCase);
         bool resetStarAnalysis = StarAnalysisOverlayLifecycle.ShouldResetForLoad(
             isNewImage,
@@ -1198,7 +1167,7 @@ public sealed partial class MainPage : Page, IDisposable
                 processing,
                 cancellationToken: cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            if (generation != _loadGeneration)
+            if (_disposed || generation != _loadGeneration)
             {
                 return false;
             }
@@ -1236,7 +1205,7 @@ public sealed partial class MainPage : Page, IDisposable
         }
         catch (Exception exception)
         {
-            if (generation == _loadGeneration)
+            if (!_disposed && generation == _loadGeneration)
             {
                 ViewModel.FailLoading(DescribeException(exception));
             }
@@ -1579,8 +1548,8 @@ public sealed partial class MainPage : Page, IDisposable
 
     private void UpdateNavigationState()
     {
-        ViewModel.CanNavigatePrevious = _selectedIndex > 0;
-        ViewModel.CanNavigateNext = _selectedIndex >= 0 && _selectedIndex < _imagePaths.Count - 1;
+        ViewModel.CanNavigatePrevious = !_isScanningFolder && FindBrowserNavigationIndex(-1) >= 0;
+        ViewModel.CanNavigateNext = !_isScanningFolder && FindBrowserNavigationIndex(1) >= 0;
         ViewModel.PositionText = _imagePaths.Count > 1 && _selectedIndex >= 0
             ? $"{_selectedIndex + 1:N0} of {_imagePaths.Count:N0}"
             : string.Empty;
@@ -1589,18 +1558,16 @@ public sealed partial class MainPage : Page, IDisposable
 
     private void SyncBrowserSelection(bool scrollIntoView)
     {
-        if (_selectedIndex < 0 || _selectedIndex >= BrowserItems.Count)
-        {
-            return;
-        }
-
         _syncingBrowserSelection = true;
         try
         {
-            ImageBrowserList.SelectedIndex = _selectedIndex;
-            if (scrollIntoView)
+            ImageBrowserItemViewModel? selected = _selectedIndex >= 0 && _selectedIndex < BrowserItems.Count
+                && _visibleBrowserPaths.Contains(_imagePaths[_selectedIndex])
+                ? BrowserItems[_selectedIndex] : null;
+            ImageBrowserList.SelectedItem = selected;
+            if (scrollIntoView && selected is not null)
             {
-                ImageBrowserList.ScrollIntoView(BrowserItems[_selectedIndex]);
+                ImageBrowserList.ScrollIntoView(selected);
             }
         }
         finally
@@ -1611,6 +1578,7 @@ public sealed partial class MainPage : Page, IDisposable
 
     private async Task PrefetchThumbnailsAroundSelectionAsync()
     {
+        if (_disposed || _isScanningFolder) return;
         _thumbnailCancellation?.Cancel();
         var cancellation = new CancellationTokenSource();
         _thumbnailCancellation = cancellation;
@@ -1634,10 +1602,13 @@ public sealed partial class MainPage : Page, IDisposable
                 }
             }
 
-            foreach (int index in indexes)
+            // Snapshot instances before awaiting: regrouping and rescanning may
+            // replace/reorder the flat collection while a thumbnail is decoded.
+            ImageBrowserItemViewModel[] items = indexes.Select(index => BrowserItems[index]).ToArray();
+            foreach (ImageBrowserItemViewModel item in items)
             {
                 cancellation.Token.ThrowIfCancellationRequested();
-                await BrowserItems[index].EnsureLoadedAsync(cancellation.Token);
+                await item.EnsureLoadedAsync(cancellation.Token);
             }
         }
         catch (OperationCanceledException)
@@ -1697,17 +1668,22 @@ public sealed partial class MainPage : Page, IDisposable
         bool supportsAstronomyProcessing = SupportsAstronomyProcessing(_currentMetadata);
         CopyAdjustmentsItem.IsEnabled = supportsAstronomyProcessing && !ViewModel.IsLoading;
         PasteAdjustmentsItem.IsEnabled = supportsAstronomyProcessing && !ViewModel.IsLoading;
-        ImageBrowserButton.IsEnabled = BrowserItems.Count > 1;
+        ImageBrowserButton.IsEnabled = CanBrowseImages;
         StackImagesButton.IsEnabled =
             _stackWindow is null &&
+            !_isScanningFolder &&
             !ViewModel.IsLoading &&
-            _imagePaths.Count(ImageFileService.IsStackableImage) >= 2;
+            GetStackableBrowserPaths().Take(2).Count() >= 2;
+        ToolTipService.SetToolTip(StackImagesButton, _browserRoot is not null && _includeSubfolders
+            ? "Choose FITS/XISF frames from this directory tree to stack (including collapsed groups)"
+            : "Choose FITS/XISF frames from the current folder to stack");
         LiveStackButton.IsEnabled = _liveStackWindow is null && !ViewModel.IsLoading;
         ParallaxVideoButton.IsEnabled = _currentPath is not null && _bitmap is not null && !ViewModel.IsLoading;
         ImageBrowserButton.Label = _isBrowserOpen ? "Hide images" : "Images";
-        ImageBrowserPane.Visibility = _isBrowserOpen && BrowserItems.Count > 1
+        ImageBrowserPane.Visibility = _isBrowserOpen && CanBrowseImages
             ? Visibility.Visible
             : Visibility.Collapsed;
+        UpdateBrowserControls();
         FitsStretchStack stretchStack = _processingHistory.Current.StretchStack;
         FitsStretchConfiguration currentStretch = stretchStack.Stages[^1];
         UndoStretchButton.IsEnabled =
@@ -1925,6 +1901,8 @@ public sealed partial class MainPage : Page, IDisposable
             return;
         }
         _disposed = true;
+        CancelBrowserDiscovery();
+        _loadGeneration++;
         _solveCancellation?.Cancel();
         _solveCancellation = null;
         _starAnalysisCancellation?.Cancel();

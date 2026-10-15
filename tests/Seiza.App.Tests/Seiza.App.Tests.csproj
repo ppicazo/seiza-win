@@ -29,6 +29,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\Seiza.App\Models\ImageBrowserGrouping.cs" Link="Models\ImageBrowserGrouping.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\ImageDirectoryScanner.cs" Link="Services\ImageDirectoryScanner.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\ImageFileTypes.cs" Link="Services\ImageFileTypes.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\NaturalStringComparer.cs" Link="Services\NaturalStringComparer.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\WindowLifetimeRegistry.cs" Link="Services\WindowLifetimeRegistry.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ParallaxRequestSource.cs" Link="Services\ParallaxRequestSource.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ParallaxCatalogStatusPresentation.cs" Link="Services\ParallaxCatalogStatusPresentation.cs" />

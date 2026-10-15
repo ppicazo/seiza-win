@@ -372,13 +372,14 @@
 
                     <Border
                         x:Name="ImageBrowserPane"
-                        Width="224"
+                        Width="264"
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="0,0,1,0"
                         Visibility="Collapsed">
                         <Grid>
                             <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
@@ -401,13 +402,99 @@
                                     <FontIcon Glyph="&#xE711;" />
                                 </Button>
                             </Grid>
+                            <StackPanel Grid.Row="1" Margin="12,0,12,8" Spacing="6">
+                                <TextBlock
+                                    x:Name="BrowserRootText"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    TextTrimming="CharacterEllipsis" />
+                                <ComboBox
+                                    x:Name="BrowserGroupingBox"
+                                    Header="Group by"
+                                    HorizontalAlignment="Stretch"
+                                    SelectedIndex="0"
+                                    SelectionChanged="BrowserGrouping_SelectionChanged">
+                                    <ComboBoxItem Content="Folder Path" />
+                                    <ComboBoxItem Content="Filter" />
+                                    <ComboBoxItem Content="File type" />
+                                    <ComboBoxItem Content="None" />
+                                </ComboBox>
+                                <TextBlock
+                                    x:Name="BrowserGroupingHelpText"
+                                    FontSize="11"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    TextWrapping="Wrap" />
+                                <CheckBox
+                                    x:Name="BrowserSubfoldersCheckBox"
+                                    Content="Include subfolders"
+                                    IsChecked="True"
+                                    Checked="BrowserSubfolders_Changed"
+                                    Unchecked="BrowserSubfolders_Changed" />
+                                <Grid ColumnSpacing="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ProgressRing x:Name="BrowserScanProgress" Width="16" Height="16" IsActive="False" Visibility="Collapsed" />
+                                    <TextBlock
+                                        x:Name="BrowserStatusText"
+                                        Grid.Column="1"
+                                        FontSize="12"
+                                        VerticalAlignment="Center"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        TextWrapping="Wrap" />
+                                    <Button
+                                        x:Name="BrowserCancelScanButton"
+                                        Grid.Column="2"
+                                        Content="Cancel"
+                                        Visibility="Collapsed"
+                                        Click="BrowserCancelScan_Click"
+                                        Padding="6,2" />
+                                </Grid>
+                            </StackPanel>
                             <ListView
                                 x:Name="ImageBrowserList"
-                                Grid.Row="1"
+                                Grid.Row="2"
                                 ContainerContentChanging="ImageBrowserList_ContainerContentChanging"
-                                ItemsSource="{x:Bind BrowserItems}"
                                 SelectionChanged="ImageBrowserList_SelectionChanged"
                                 SelectionMode="Single">
+                                <ListView.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <ItemsStackPanel AreStickyGroupHeadersEnabled="True" />
+                                    </ItemsPanelTemplate>
+                                </ListView.ItemsPanel>
+                                <ListView.GroupStyle>
+                                    <GroupStyle HidesIfEmpty="False">
+                                        <GroupStyle.HeaderTemplate>
+                                            <DataTemplate>
+                                                <Button
+                                                    Margin="4,4,4,0"
+                                                    HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Stretch"
+                                                    Padding="8,6"
+                                                    AutomationProperties.Name="{Binding ToggleActionText}"
+                                                    Click="BrowserGroup_Click"
+                                                    Style="{StaticResource SubtleButtonStyle}"
+                                                    Tag="{Binding}"
+                                                    ToolTipService.ToolTip="{Binding ToggleActionText}">
+                                                    <Grid ColumnSpacing="8">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <FontIcon FontSize="12" Glyph="{Binding ChevronGlyph}" />
+                                                        <TextBlock
+                                                            Grid.Column="1"
+                                                            FontWeight="SemiBold"
+                                                            Text="{Binding HeaderText}"
+                                                            TextWrapping="Wrap" />
+                                                    </Grid>
+                                                </Button>
+                                            </DataTemplate>
+                                        </GroupStyle.HeaderTemplate>
+                                    </GroupStyle>
+                                </ListView.GroupStyle>
                                 <ListView.ItemContainerStyle>
                                     <Style TargetType="ListViewItem">
                                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -435,6 +522,12 @@
                                             <TextBlock
                                                 FontSize="12"
                                                 Text="{x:Bind FileName}"
+                                                TextTrimming="CharacterEllipsis"
+                                                ToolTipService.ToolTip="{x:Bind Path}" />
+                                            <TextBlock
+                                                FontSize="11"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{x:Bind DisplayFolderPath}"
                                                 TextTrimming="CharacterEllipsis"
                                                 ToolTipService.ToolTip="{x:Bind Path}" />
                                         </StackPanel>

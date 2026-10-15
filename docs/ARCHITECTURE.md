@@ -42,6 +42,31 @@ solving. Windows loads thumbnails through an isolated `dllhost.exe` and previews
 through the x64 low-integrity `prevhost.exe`; the MSI intentionally does not
 disable process isolation.
 
+## Directory image browser
+
+Explicit folder opening recursively discovers supported images off the UI
+thread; single-file opening discovers only its top-level siblings. Discovery
+is cancellable and superseded requests cannot replace the active collection.
+Descendant junctions/symbolic links are not traversed, and inaccessible
+subfolders are counted without hiding the rest of the tree.
+
+The pure grouping model produces Folder Path/Filter/File type/None groups and their
+flattened navigation order. A virtualized WinUI ListView presents those groups;
+display-only regrouping reuses thumbnail view models and preserves selection
+by full path, so same-named files in different folders remain distinct.
+Filter grouping reuses the stacker's filename classifier without decoding
+source files. Collapsible group headers retain their full counts and remain
+keyboard-focusable when empty. Expansion state is independent per grouping
+mode. Navigation and thumbnail prefetch use the complete grouped order;
+changing selection, regrouping, or reopening the sidebar reveals the selected
+image by expanding its group. Collapsing a group does not filter navigation or
+close the current document. Deferred reveal scrolling rejects stale targets.
+Directory stacking uses every FITS/XISF path in the scanned collection,
+independent of display grouping, selection, or collapse state. The Include
+subfolders control defines recursive versus top-level scope. The stacking
+dialog allows explicit frame selection and labels frames/references relative
+to the opened root so repeated filenames remain distinguishable.
+
 ## Display scaling
 
 The main viewer uses `HighQualityCubic` when reducing a bitmap and
