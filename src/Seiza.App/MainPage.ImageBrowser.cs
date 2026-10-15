@@ -313,11 +313,8 @@ public sealed partial class MainPage
         ImageBrowserList.IsEnabled = !_isScanningFolder;
     }
 
-    private IEnumerable<string> GetStackableBrowserPaths()
-    {
-        string? currentFolder = _currentPath is null ? null : Path.GetDirectoryName(_currentPath);
-        return _imagePaths.Where(path => ImageFileService.IsStackableImage(path)
-            && (_browserRoot is null || (currentFolder is not null
-                && string.Equals(Path.GetDirectoryName(path), currentFolder, StringComparison.OrdinalIgnoreCase))));
-    }
+    // The scanned collection defines stacking scope. Grouping and collapse are
+    // presentation only; they must not silently withhold tree inputs.
+    private IEnumerable<string> GetStackableBrowserPaths() =>
+        _imagePaths.Where(ImageFileService.IsStackableImage);
 }

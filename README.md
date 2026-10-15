@@ -244,8 +244,10 @@ without a Windows restart.
 
 - Directory image stacking registers and combines selected FITS or XISF
   light frames into an unstretched 32-bit floating-point FITS image.
-  When browsing a directory tree, **Stack** uses the current image's containing
-  folder, not every subfolder; sidebar grouping does not change stacking scope.
+  When **Include subfolders** is on, **Stack** offers FITS/XISF frames from the
+  entire opened tree, including collapsed groups. Turn it off to limit inputs
+  to the opened folder. Choose light frames in the stacking dialog; relative
+  paths distinguish same-named files in its frame and reference lists.
 - Stacks can be split automatically by filename filter, with an independent
   reference frame for each filter group. Global or local normalization,
   delta-sigma rejection, registration limits, and calibration match the macOS

@@ -58,8 +58,11 @@ Filter grouping reuses the stacker's filename classifier without decoding
 source files. Collapsible group headers retain their full counts and remain
 keyboard-focusable when empty. Expansion state is independent per grouping
 mode, and navigation skips hidden cards without closing the current document.
-Directory stacking is scoped to the current image's containing directory,
-independent of the display grouping.
+Directory stacking uses every FITS/XISF path in the scanned collection,
+independent of display grouping, selection, or collapse state. The Include
+subfolders control defines recursive versus top-level scope. The stacking
+dialog allows explicit frame selection and labels frames/references relative
+to the opened root so repeated filenames remain distinguishable.
 
 ## Display scaling
 

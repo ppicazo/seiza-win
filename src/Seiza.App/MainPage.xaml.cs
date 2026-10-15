@@ -142,7 +142,7 @@ public sealed partial class MainPage : Page, IDisposable
             return;
         }
 
-        var window = new ImageStackWindow(paths);
+        var window = new ImageStackWindow(paths, _browserRoot);
         _stackWindow = window;
         UpdateVisualState();
         window.Activate();
@@ -1680,9 +1680,9 @@ public sealed partial class MainPage : Page, IDisposable
             !_isScanningFolder &&
             !ViewModel.IsLoading &&
             GetStackableBrowserPaths().Take(2).Count() >= 2;
-        ToolTipService.SetToolTip(StackImagesButton, _browserRoot is null
-            ? "Stack images from the current folder"
-            : "Stack images from the selected image’s folder (not the whole directory tree)");
+        ToolTipService.SetToolTip(StackImagesButton, _browserRoot is not null && _includeSubfolders
+            ? "Choose FITS/XISF frames from this directory tree to stack (including collapsed groups)"
+            : "Choose FITS/XISF frames from the current folder to stack");
         LiveStackButton.IsEnabled = _liveStackWindow is null && !ViewModel.IsLoading;
         ParallaxVideoButton.IsEnabled = _currentPath is not null && _bitmap is not null && !ViewModel.IsLoading;
         ImageBrowserButton.Label = _isBrowserOpen ? "Hide images" : "Images";

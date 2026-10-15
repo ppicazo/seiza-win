@@ -408,6 +408,26 @@ public sealed class ImageStackingTests
     }
 
     [Fact]
+    public void TreeFrameLabelsDisambiguateDuplicateNamesAndPreserveInputPaths()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "stack-label-tests");
+        string first = Path.Combine(root, "night2", "light.fits");
+        string second = Path.Combine(root, "night10", "light.fits");
+        Assert.Equal(Path.Combine("night2", "light.fits"), ImageStackFrameLabel.DisplayName(first, root));
+        Assert.Equal(Path.Combine("night10", "light.fits"), ImageStackFrameLabel.DisplayName(second, root));
+        Assert.Equal("light.fits", ImageStackFrameLabel.DisplayName(Path.Combine(root, "light.fits"), root));
+        Assert.Equal("light.fits", ImageStackFrameLabel.DisplayName(first, null));
+    }
+
+    [Fact]
+    public void TreeFrameLabelsKeepOutsideRootPathsUnambiguous()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "stack-label-tests");
+        string outside = Path.Combine(Path.GetTempPath(), "stack-label-tests-other", "light.fits");
+        Assert.Equal(Path.GetFullPath(outside), ImageStackFrameLabel.DisplayName(outside, root));
+    }
+
+    [Fact]
     public void BatchValidationRejectsDuplicateOutputPaths()
     {
         ImageStackJob[] jobs =
