@@ -367,7 +367,7 @@ public sealed partial class ImageInspector : UserControl
     public void ShowSolveResult(SolveResult result)
     {
         SolveDetails.Clear();
-        SolveStateText.Text = $"Solved in {result.ElapsedMilliseconds / 1000.0:0.00}s";
+        SolveStateText.Text = result.IsUncheckedHeader ? result.SourceDescription : $"Solved in {result.ElapsedMilliseconds / 1000.0:0.00}s";
         SolveProgressRing.IsActive = false;
         SolveProgressRing.Visibility = Visibility.Collapsed;
         SidebarSolveButton.Visibility = Visibility.Collapsed;
@@ -380,6 +380,9 @@ public sealed partial class ImageInspector : UserControl
         SolveDetails.Add(new("Matches", result.MatchedStars.ToString("N0", CultureInfo.CurrentCulture)));
         SolveDetails.Add(new("Detected", result.DetectedStars.ToString("N0", CultureInfo.CurrentCulture)));
         SolveDetails.Add(new("RMS", $"{result.RmsArcsec:N2}″"));
+        if (result.SourceDescription is string source) SolveDetails.Add(new("Solution source", source));
+        if (result.FalseMatchProbability is double probability)
+            SolveDetails.Add(new("False-match probability", probability.ToString("0.###E+0", CultureInfo.InvariantCulture)));
         if (!string.IsNullOrWhiteSpace(result.CaptureTime))
         {
             SolveDetails.Add(new("Acquired", result.CaptureTime));

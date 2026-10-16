@@ -18,6 +18,20 @@ public sealed class SolveResult
 
     public int ElapsedMilliseconds { get; init; }
 
+    public string? SolvedFrom { get; init; }
+
+    public double? FalseMatchProbability { get; init; }
+
+    [JsonIgnore] public bool IsUncheckedHeader => SolvedFrom == "header-unchecked";
+    [JsonIgnore] public string? SourceDescription => SolvedFrom switch
+    {
+        "header-checked" => "Solved from the file's own solution",
+        "header-hint" => "Solved near the file's pointing",
+        "blind" => "Solved blind",
+        "header-unchecked" => "Using the file's own solution; no stars confirmed it.",
+        _ => null,
+    };
+
     public SolveImagePoint[] DetectedStarPositions { get; init; } = [];
 
     public SolveCatalogStarPoint[] CatalogStarPositions { get; init; } = [];
@@ -128,6 +142,10 @@ public sealed class SolveObjectContour
 
 public sealed class WcsResult
 {
+    // Older cores also use zero-based image pixels, but did not label them.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int PixelOrigin { get; init; }
+
     public double[] Crval { get; init; } = [];
 
     public double[] Crpix { get; init; } = [];

@@ -274,9 +274,9 @@ public sealed class ParallaxModelTests
     {
         var composition = new ParallaxComposition();
         using var document = JsonDocument.Parse(composition.VideoSettings(false).ToJson());
-        foreach (string key in new[] { "start", "dolly", "truck", "truckAngleDegrees", "pan", "zoom", "zoomEnd", "rotateDegrees", "easing", "quality", "growthLimit", "fadeFrom", "tour", "tourGlide", "tourTitles", "tourLoop", "seconds", "fps", "size", "overlay", "overlayDensity", "labels", "labelColor", "watermark" })
+        foreach (string key in new[] { "framing", "start", "dolly", "truck", "truckAngleDegrees", "pan", "zoom", "zoomEnd", "rotateDegrees", "easing", "quality", "growthLimit", "fadeFrom", "tour", "tourGlide", "tourTitles", "tourLoop", "seconds", "fps", "size", "overlay", "overlayDensity", "labels", "labelColor", "watermark" })
             Assert.True(document.RootElement.TryGetProperty(key, out _), key);
-        foreach (string key in new[] { "image", "wcs", "distanceFocus", "distanceParsecs", "smallStars", "online", "catalogDirectory", "autoTour", "dustMap", "autoPlanes", "distanceOverrides" })
+        foreach (string key in new[] { "crop", "image", "wcs", "distanceFocus", "distanceParsecs", "smallStars", "online", "catalogDirectory", "autoTour", "dustMap", "autoPlanes", "distanceOverrides" })
             Assert.False(document.RootElement.TryGetProperty(key, out _), key);
         Assert.False(document.RootElement.GetProperty("watermark").GetBoolean());
         composition.CreditEnabled = true;

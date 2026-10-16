@@ -151,10 +151,18 @@ internal static unsafe class SeizaCore
         string? catalogDirectory,
         double minimumScaleArcsecPerPixel = 0.1,
         double maximumScaleArcsecPerPixel = 20.0,
-        byte sipOrder = 0)
+        byte sipOrder = 0,
+        double timeLimitSeconds = 120,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        bool bounded = System.Version.TryParse(Version, out var version) && version >= new System.Version(0, 32, 0);
+        using var signal = bounded ? new SafeCancelSignalHandle(NativeMethods.CreateCancelSignal()) : null;
+        if (signal?.IsInvalid == true) throw new SeizaCoreException("Could not create the solve cancellation signal.");
+        using var registration = signal is null ? default : cancellationToken.UnsafeRegister(static state => ((SafeCancelSignalHandle)state!).Cancel(), signal);
         nint error = 0;
-        nint json = NativeMethods.SolveImageJson(
+        nint json = bounded ? NativeMethods.SolveImageWithLimitsJson(path, catalogDirectory,
+            minimumScaleArcsecPerPixel, maximumScaleArcsecPerPixel, sipOrder, timeLimitSeconds, signal!, out error) : NativeMethods.SolveImageJson(
             path,
             catalogDirectory,
             minimumScaleArcsecPerPixel,
@@ -163,11 +171,17 @@ internal static unsafe class SeizaCore
             out error);
         if (json == 0)
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                if (error != 0) NativeMethods.FreeString(error);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
             throw ReadError(error, "The Seiza native core could not solve the image.");
         }
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string value = Marshal.PtrToStringUTF8(json)
                 ?? throw new SeizaCoreException("The Seiza native core returned an invalid solve result.");
             return JsonSerializer.Deserialize(

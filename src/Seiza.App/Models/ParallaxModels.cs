@@ -6,11 +6,47 @@ namespace Seiza.App.Models;
 
 public enum ParallaxMotion { FlyIn, Tour }
 
+// Drafts and markers use uncropped source pixels. Only native requests and
+// portable itineraries use pixels relative to the filmed rectangle.
+public static class ParallaxGeometry
+{
+    public static bool ValidCrop(int[]? crop) => crop is null ||
+        crop.Length == 4 && crop[0] >= 0 && crop[1] >= 0 && crop[2] >= 16 && crop[3] >= 16;
+    public static bool CropInside(int[]? crop, int width, int height) => ValidCrop(crop) &&
+        (crop is null || (long)crop[0] + crop[2] <= width && (long)crop[1] + crop[3] <= height);
+    public static double[]? ToCrop(double[]? point, int[]? crop) => point is null ? null :
+        [point[0] - (crop?[0] ?? 0), point[1] - (crop?[1] ?? 0)];
+    public static double[]? ToSource(double[]? point, int[]? crop) => point is null ? null :
+        [point[0] + (crop?[0] ?? 0), point[1] + (crop?[1] ?? 0)];
+    public static (int Width, int Height) ImageSize(int width, int height, int longSide)
+    {
+        if (width <= 0 || height <= 0 || longSide is < 16 or > 3840 || longSide % 2 != 0)
+            throw new ArgumentOutOfRangeException(nameof(longSide), "Image dimensions must be positive and the long side even, between 16 and 3840.");
+        int shortSide = Math.Clamp((int)Math.Round(longSide * ((double)Math.Min(width, height) / Math.Max(width, height)) / 2,
+            MidpointRounding.AwayFromZero) * 2, 16, longSide);
+        return width >= height ? (longSide, shortSide) : (shortSide, longSide);
+    }
+    public static int[] CropFromDrag(double ax, double ay, double bx, double by, int sourceWidth, int sourceHeight, double? aspect = null)
+    {
+        ax = Math.Clamp(ax, 0, sourceWidth); ay = Math.Clamp(ay, 0, sourceHeight);
+        bx = Math.Clamp(bx, 0, sourceWidth); by = Math.Clamp(by, 0, sourceHeight);
+        double width = Math.Abs(bx - ax), height = Math.Abs(by - ay);
+        if (aspect is > 0 && double.IsFinite(aspect.Value))
+        {
+            width = Math.Min(width, height * aspect.Value); height = width / aspect.Value;
+        }
+        int w = (int)Math.Floor(width), h = (int)Math.Floor(height);
+        return [(int)Math.Floor(bx >= ax ? ax : ax - w), (int)Math.Floor(by >= ay ? ay : ay - h), w, h];
+    }
+}
+
 public sealed record ParallaxStop
 {
     [JsonIgnore] public Guid Id { get; set; } = Guid.NewGuid();
     public string? Name { get; set; }
     public double[]? Focus { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool PullBackToWholeImage { get; set; }
     public double Dolly { get; set; }
     public double Zoom { get; set; } = 1;
     public double RotateDegrees { get; set; }
@@ -29,6 +65,8 @@ public sealed record ParallaxStop
     public double? DepthParsecs { get; set; }
     [JsonIgnore] public string DisplayName => Name ?? (Focus is null ? "Whole Image" : "Custom Point");
     public ParallaxStop DeepClone() => this with { Focus = Focus?.ToArray() };
+    public void PullBack() { Dolly = 0; Zoom = 1; Pan = 0; Push = 0; PullBackToWholeImage = true; }
+    public void EditCamera(Action<ParallaxStop> edit) { edit(this); PullBackToWholeImage = true; }
 }
 
 public sealed record ParallaxTourOptions
@@ -49,6 +87,10 @@ public sealed record ParallaxTourPlan
     public double? TourGlide { get; set; }
     public bool? TourTitles { get; set; }
     public bool? TourLoop { get; set; }
+    // Optional source rectangle for a saved itinerary's crop-relative points.
+    // Full-image saves include [0,0,width,height] to disambiguate older files.
+    public int[]? Crop { get; set; }
+    [JsonIgnore] public bool RestoreCrop { get; set; }
     // Planned on the prepared scene, whose depths its stops carry, rather than
     // from the catalogue alone.
     [JsonIgnore] public bool PlannedOnScene { get; set; }
@@ -57,6 +99,19 @@ public sealed record ParallaxTourPlan
     [JsonIgnore] public bool PreserveStopDepths { get; set; }
     public string ToJson() => ParallaxJson.SerializePlan(this);
     public static ParallaxTourPlan FromJson(string json) => ParallaxJson.DeserializePlan(json);
+
+    public ParallaxTourPlan InSourceCoordinates(int[]? crop) => MapCoordinates(crop, toSource: true);
+    public ParallaxTourPlan InCropCoordinates(int[]? crop) => MapCoordinates(crop, toSource: false);
+    private ParallaxTourPlan MapCoordinates(int[]? crop, bool toSource) => this with
+    {
+        Focus = (toSource ? ParallaxGeometry.ToSource(Focus, crop) : ParallaxGeometry.ToCrop(Focus, crop))!,
+        Crop = crop?.ToArray(),
+        RestoreCrop = toSource,
+        Tour = Tour.Select(stop => stop.DeepClone() with
+        {
+            Focus = toSource ? ParallaxGeometry.ToSource(stop.Focus, crop) : ParallaxGeometry.ToCrop(stop.Focus, crop),
+        }).ToList(),
+    };
 
     // File itineraries carry cards beside the tour, not beside the running
     // executable. Keep the context-free overloads for the native planning API.
@@ -88,12 +143,13 @@ public sealed record ParallaxTourPlan
     private ParallaxTourPlan WithCardPaths(Func<string, string> map) => this with
     {
         Focus = Focus.ToArray(),
+        Crop = Crop?.ToArray(),
         Tour = Tour.Select(stop => stop.DeepClone() with { Card = stop.Card is null ? null : map(stop.Card) }).ToList(),
     };
 
     public void Validate()
     {
-        if (SchemaVersion != 1 || !ParallaxComposition.ValidPoint(Focus) || Focus.Length != 2 || Tour is null || Tour.Count < 2)
+        if (SchemaVersion != 1 || !ParallaxGeometry.ValidCrop(Crop) || !ParallaxComposition.ValidPoint(Focus) || Focus.Length != 2 || Tour is null || Tour.Count < 2)
             throw new InvalidDataException("The tour plan has an unsupported schema or invalid stops.");
         var composition = new ParallaxComposition { Motion = ParallaxMotion.Tour, Stops = Tour };
         composition.Scene.DistanceFocus = Focus;
@@ -106,6 +162,7 @@ public sealed record ParallaxTourPlan
 
 public sealed record ParallaxSceneSettings
 {
+    public int[]? Crop { get; set; }
     public double[]? DistanceFocus { get; set; }
     public double? DistanceParsecs { get; set; }
     public double? UnmatchedDistanceParsecs { get; set; }
@@ -130,6 +187,7 @@ public sealed record ParallaxSceneSettings
     public ParallaxSceneSettings DeepClone() => this with
     {
         DistanceFocus = DistanceFocus?.ToArray(),
+        Crop = Crop?.ToArray(),
         DistanceOverrides = DistanceOverrides?.Select(given => given with { }).ToList(),
         Planes = Planes?.Select(plane => plane with { }).ToList(),
     };
@@ -215,6 +273,7 @@ public sealed record ParallaxWatermark(string? Text)
 // defaults, not values from the old handle. Never put scene fields in this type.
 public sealed record ParallaxVideoSettings
 {
+    public string? Framing { get; set; } = "fill";
     public double[]? Focus { get; set; }
     public string Start { get; set; } = "whole";
     public double Dolly { get; set; } = 0.4;
@@ -271,6 +330,14 @@ public sealed record ParallaxComposition
     public bool TourLoop { get; set; }
     public int Width { get; set; } = 1920;
     public int Height { get; set; } = 1080;
+    public string Framing { get; set; } = "fill";
+    public bool MatchImageShape { get; set; }
+    public int ImageLongSide { get; set; } = 1920;
+    [JsonIgnore] public int SourceWidth { get; set; }
+    [JsonIgnore] public int SourceHeight { get; set; }
+    [JsonIgnore] public (int Width, int Height) OutputDimensions => MatchImageShape
+        ? ParallaxGeometry.ImageSize(Scene.Crop?[2] ?? SourceWidth, Scene.Crop?[3] ?? SourceHeight, ImageLongSide)
+        : (Width, Height);
     public int Fps { get; set; } = 30;
     public string Quality { get; set; } = "standard";
     public double GrowthLimit { get; set; } = 4;
@@ -312,7 +379,7 @@ public sealed record ParallaxComposition
         {
             if (Motion != ParallaxMotion.Tour || !TourLoop || Stops.Count < 2) return 0;
             ParallaxStop first = Stops[0], last = Stops[^1];
-            if (PointsEqual(first.Focus, last.Focus) && first.Dolly == last.Dolly && first.Zoom == last.Zoom && first.Pan == last.Pan) return 0;
+            if (PointsEqual(first.Focus, last.Focus) && first.PullBackToWholeImage == last.PullBackToWholeImage && first.Dolly == last.Dolly && first.Zoom == last.Zoom && first.Pan == last.Pan) return 0;
             return Stops.Skip(1).Average(stop => stop.Travel) + Math.Max(first.Hold * 3, 3);
         }
     }
@@ -335,6 +402,7 @@ public sealed record ParallaxComposition
             DepthParsecs = plan.PlannedOnScene || plan.PreserveStopDepths ? stop.DepthParsecs : null,
         }).ToList();
         if (!plan.PlannedOnScene) { Scene.DistanceFocus = plan.Focus.ToArray(); DistanceName = plan.FocusName; }
+        if (plan.RestoreCrop || plan.Crop is not null) Scene.Crop = plan.Crop?.ToArray();
         TourGlide = plan.TourGlide ?? TourGlide; TourTitles = plan.TourTitles ?? TourTitles; TourLoop = plan.TourLoop ?? TourLoop;
     }
 
@@ -355,7 +423,12 @@ public sealed record ParallaxComposition
     {
         get
         {
-            if (Width is < 16 or > 3840 || Height is < 16 or > 3840 || Width % 2 != 0 || Height % 2 != 0 || Fps is not (24 or 30 or 60))
+            if (Framing is not ("fill" or "fit")) return "Choose Fill frame or Show whole image.";
+            if (!ParallaxGeometry.ValidCrop(Scene?.Crop) || SourceWidth > 0 && SourceHeight > 0 && !ParallaxGeometry.CropInside(Scene?.Crop, SourceWidth, SourceHeight))
+                return "The crop must be inside the source image and at least 16 pixels each way.";
+            if (MatchImageShape && ((Scene?.Crop?[2] ?? SourceWidth) <= 0 || (Scene?.Crop?[3] ?? SourceHeight) <= 0 ||
+                ImageLongSide is < 16 or > 3840 || ImageLongSide % 2 != 0)) return "Choose an even image-shaped output size between 16 and 3840 pixels.";
+            if ((!MatchImageShape && (Width is < 16 or > 3840 || Height is < 16 or > 3840 || Width % 2 != 0 || Height % 2 != 0)) || Fps is not (24 or 30 or 60))
                 return "Choose even dimensions between 16 and 3840 pixels and 24, 30 or 60 fps.";
             if (Stops is null || Stops.Any(stop => stop is null) || Scene is null || Labels is null ||
                 Scene.DistanceOverrides?.Any(given => given is null || string.IsNullOrWhiteSpace(given.ObjectName)) == true ||
@@ -399,7 +472,8 @@ public sealed record ParallaxComposition
 
     public ParallaxVideoSettings VideoSettings(bool preview)
     {
-        int width = Math.Max(16, Width / 2 * 2), height = Math.Max(16, Height / 2 * 2);
+        (int width, int height) = OutputDimensions;
+        width = Math.Max(16, width / 2 * 2); height = Math.Max(16, height / 2 * 2);
         if (preview && Math.Max(width, height) > 960)
         {
             bool landscape = width >= height;
@@ -414,13 +488,13 @@ public sealed record ParallaxComposition
         }
         return new()
         {
-            Focus = Focus?.ToArray(), Start = Start, Dolly = Dolly, Truck = Truck, TruckAngleDegrees = TruckAngleDegrees,
+            Framing = Framing, Focus = ParallaxGeometry.ToCrop(Focus, Scene.Crop), Start = Start, Dolly = Dolly, Truck = Truck, TruckAngleDegrees = TruckAngleDegrees,
             Pan = Pan, Zoom = Zoom, ZoomEnd = ZoomEnd, RotateDegrees = [RotationStart, Rotation], Easing = Easing,
             Quality = preview ? "standard" : Quality, GrowthLimit = GrowthLimit, FadeFrom = FadeFrom,
-            Tour = Motion == ParallaxMotion.Tour ? Stops.Select(stop => stop.DeepClone()).ToList() : [], TourGlide = TourGlide,
+            Tour = Motion == ParallaxMotion.Tour ? Stops.Select(stop => stop.DeepClone() with { Focus = ParallaxGeometry.ToCrop(stop.Focus, Scene.Crop) }).ToList() : [], TourGlide = TourGlide,
             TourTitles = Motion == ParallaxMotion.Tour && TourTitles, TourLoop = Motion == ParallaxMotion.Tour && TourLoop,
             Seconds = Duration, Fps = Fps, Size = FormattableString.Invariant($"{width}x{height}"), Overlay = Overlay,
-            OverlayDensity = OverlayDensity, Labels = Labels.Select(label => label with { }).ToList(), LabelColor = LabelColor,
+            OverlayDensity = OverlayDensity, Labels = Labels.Select(label => label with { X = label.X - (Scene.Crop?[0] ?? 0), Y = label.Y - (Scene.Crop?[1] ?? 0) }).ToList(), LabelColor = LabelColor,
             Watermark = new ParallaxWatermark(CreditEnabled ? Credit : null)
             {
                 Image = WatermarkImage, Corner = WatermarkCorner, Size = WatermarkSize, Opacity = WatermarkOpacity,
@@ -482,6 +556,9 @@ public sealed record ParallaxFit
     public ParallaxFitValue Pan { get; init; } = new();
     public ParallaxFitValue Lead { get; init; } = new();
     public ParallaxFitValue Truck { get; init; } = new();
+    // Temporary lens magnification between fixed endpoints, not a stop edit.
+    // Missing on older cores.
+    public ParallaxFitValue? MotionZoom { get; init; }
     public ParallaxStopFit[] Stops { get; init; } = [];
     public bool Inside { get; init; }
     [JsonIgnore] public string? EdgeWarning => Inside ? null : "Some frames extend beyond the image. Move the focus or tour stops inward, or reduce roll and pan.";
@@ -495,6 +572,7 @@ public sealed record ParallaxFit
                 if (value.Changed) result.Add(string.Create(CultureInfo.InvariantCulture, $"{name}: {value.Asked:F2} → {value.Used:F2}"));
             }
             Add("Zoom", Zoom); Add("Pan", Pan); Add("Sideways lead", Lead); Add("Sideways motion", Truck);
+            if (MotionZoom is { } motionZoom) Add("Transition zoom", motionZoom);
             for (int i = 0; i < Stops.Length; i++)
             {
                 Add($"Stop {i + 1} zoom", Stops[i].Zoom); Add($"Stop {i + 1} pan", Stops[i].Pan);
@@ -506,6 +584,7 @@ public sealed record ParallaxFit
 }
 public sealed record ParallaxSummary
 {
+    public int[]? Crop { get; init; }
     public int SchemaVersion { get; init; }
     public int Frames { get; init; }
     public int Fps { get; init; }

@@ -41,6 +41,11 @@ public sealed partial class ParallaxWindow : Window, IDisposable
     private bool _closed;
     private ContentDialog? _activityDialog;
     private ContentDialog? _editDialog;
+    private double[]? _cropAnchor;
+    private int[]? _cropDraft;
+    private int[]? _cropNumericDraft;
+    private ParallaxComposition? _cropDraftComposition;
+    private bool _lockCropAspect;
     private IReadOnlyList<ParallaxPlane>? _inspectorPlanes;
     private string _sequenceFolderName = "Parallax frames";
     private readonly ParallaxWindowSizing _windowSizing;
@@ -132,6 +137,9 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         _refreshing = true;
         try
         {
+            if (!ReferenceEquals(_cropDraftComposition, Composition))
+            { _cropDraftComposition = Composition; _cropNumericDraft = null; }
+            if (!Session.PickingCrop) { _cropAnchor = null; _cropDraft = null; }
             bool busy = Session.IsBusy;
             UndoButton.IsEnabled = Session.CanUndo && !busy;
             RedoButton.IsEnabled = Session.CanRedo && !busy;
@@ -142,7 +150,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             TourHost.IsEnabled = !busy;
             TourPanel.Visibility = Composition.Motion == ParallaxMotion.Tour ? Visibility.Visible : Visibility.Collapsed;
             ViewPicker.SelectedIndex = Session.ShowsSource ? 0 : 1;
-            PickingText.Text = Session.PickingDistance ? "Click the scene’s distance reference" :
+            PickingText.Text = Session.PickingCrop ? "Drag the filmed crop on the source image" : Session.PickingDistance ? "Click the scene’s distance reference" :
                 Session.PickingDestination ? "Click a destination in the source" : string.Empty;
             PlayButton.IsEnabled = Session.HasPreview && !busy;
             PlayButton.Content = Session.IsPlaying ? "\uE769" : "\uE768";
@@ -161,14 +169,15 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             OperationProgress.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
             OperationProgress.IsIndeterminate = Session.Progress is null;
             OperationProgress.Value = Math.Clamp(Session.Progress ?? 0, 0, 1);
-            StatusText.Text = Composition.ValidationMessage ??
-                (active && !Session.Activity.CancellationRequested ? Session.Activity.NetworkPhase : null) ?? Session.Status;
+            StatusText.Text = Session.ValidationMessage ??
+                (active && !Session.Activity.CancellationRequested ? Session.Activity.NetworkPhase : null) ??
+                (!busy && !Session.CanPrepare ? Session.PreparationIssue : null) ?? Session.Status;
             CancelButton.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
             CancelButton.IsEnabled = Session.SourceReady && !Session.Activity.CancellationRequested;
             ShowVideoButton.Visibility = Session.ExportedPath is not null ? Visibility.Visible : Visibility.Collapsed;
             UpdateActivity();
 
-            string structure = $"{InspectorPicker.SelectedIndex}:{Composition.Motion}:{Session.SelectedStop}:" +
+            string structure = $"{InspectorPicker.SelectedIndex}:{Composition.Motion}:{Session.SelectedStop}:{Session.SourceReady}:{Session.Width}:{Session.Height}:" +
                 $"{Session.SelectedIndex}:" + string.Join(',', Composition.Labels.Select(label => label.Id)) + ":" + PlaneRowsKey() + ":" +
                 string.Join(',', (Composition.Scene.Planes ?? []).Select(plane => plane.Id)) + ":" + Session.ExportFormat;
             if (_inspectorStructure != structure || !ReferenceEquals(_inspectorPlanes, Session.ScenePlanes))
@@ -314,7 +323,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         });
     }
 
-    private void Choice<T>(StackPanel panel, string title, Func<T> get, Action<T> set,
+    private ComboBox Choice<T>(StackPanel panel, string title, Func<T> get, Action<T> set,
         params (T Value, string Name)[] choices)
     {
         var picker = new ComboBox { Header = title, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -330,21 +339,46 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         };
         panel.Children.Add(picker);
         _refreshControls.Add(Select);
+        return picker;
     }
 
     private void Slider(StackPanel panel, string title, Func<double> get, Action<double> set,
-        double minimum = 0, double maximum = 1)
+        double minimum = 0, double maximum = 1, Func<double, string>? format = null,
+        string? tooltip = null, double step = 0.01, bool retainRange = false)
     {
         var label = new TextBlock { FontSize = 12 };
         panel.Children.Add(label);
-        var slider = new Slider { Minimum = minimum, Maximum = maximum, Value = get(), StepFrequency = 0.01 };
+        var slider = new Slider { Minimum = retainRange ? Math.Min(minimum, get()) : minimum,
+            Maximum = retainRange ? Math.Max(maximum, get()) : maximum, Value = get(), StepFrequency = step };
         AutomationProperties.SetName(slider, title);
+        if (tooltip is not null) ToolTipService.SetToolTip(slider, tooltip);
         slider.ValueChanged += (_, args) =>
         {
             if (!_refreshing && !_closed) { set(args.NewValue); Refresh(); }
         };
         panel.Children.Add(slider);
-        _refreshControls.Add(() => { slider.Value = get(); label.Text = $"{title}: {get():0.##}"; });
+        _refreshControls.Add(() =>
+        {
+            if (retainRange) { slider.Minimum = Math.Min(minimum, get()); slider.Maximum = Math.Max(maximum, get()); }
+            slider.Value = get(); label.Text = $"{title}: {format?.Invoke(get()) ?? get().ToString("0.##", System.Globalization.CultureInfo.CurrentCulture)}";
+        });
+    }
+
+    private void ZoomControl(StackPanel panel, string title, Func<double> get, Action<double> set, double minimum = 1)
+    {
+        Slider(panel, title, get, set, minimum, 8, value => $"{value:0.##}×",
+            "Lens magnification: 0.5× gives a wider view, 1× is the base view, and 2× magnifies it. Dolly moves through depth instead. Overall zoom and camera fitting also apply.",
+            step: 0.05, retainRange: true);
+        var reset = Button(panel, "Reset to 1×", () => set(1));
+        AutomationProperties.SetName(reset, $"Reset {title} to 1×");
+    }
+
+    private void DollyControl(StackPanel panel, Func<double> get, Action<double> set)
+    {
+        Slider(panel, "Dolly", get, set, 0, 0.99, value => $"{value:P0}",
+            "Moves toward the background through depth. Reducing Dolly pulls back and changes how near stars move against the nebula; a high Dolly stays close even at Zoom 1×.", retainRange: true);
+        var reset = Button(panel, "Reset Dolly to 0%", () => set(0));
+        AutomationProperties.SetName(reset, "Reset Dolly to 0%");
     }
 
     private void OptionalDistance(StackPanel panel, string title, string field, Func<double?> get, Action<double?> set,
@@ -388,9 +422,11 @@ public sealed partial class ParallaxWindow : Window, IDisposable
     private void BuildSourceInspector()
     {
         StackPanel source = Section("Source snapshot");
-        Note(source, value: () => Session.SourceReady ? $"{Session.Width:N0} × {Session.Height:N0} pixels" : "Preparing full-resolution snapshot…");
-        Note(source, value: () => Session.HasWcs ? "Sky coordinates available" : "The image will be plate solved when preparing or generating a tour.");
+        Note(source, value: () => Session.SourceReady ? $"Source: {Session.Width:N0} × {Session.Height:N0} pixels · Filmed: {Session.FilmedRectangle[2]:N0} × {Session.FilmedRectangle[3]:N0}" : "Preparing full-resolution snapshot…");
+        Note(source, value: () => Session.SolvingDescription);
+        Note(source, value: () => Session.PreparationIssue ?? string.Empty, warning: true);
         Note(source, "Uses the current image adjustments. Imported layers must use the same stretch and alignment.");
+        BuildCropInspector();
 
         StackPanel separation = Section("Star separation");
         Toggle(separation, "Use StarXTerminator", () => Session.AutomaticSeparation, value => Session.AutomaticSeparation = value);
@@ -593,7 +629,8 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         Slider(generation, "Generated motion", () => Session.TourOptions.Motion, value => Session.TourOptions.Motion = value, 0, 2);
         Note(generation, "0 removes generated roll and pan. Options affect the next candidate, not the current draft.");
         Button generate = AsyncButton(generation, "Generate Tour", Session.GenerateTourAsync,
-            () => Session.SourceReady && !Session.CatalogsRunning);
+            () => Session.SourceReady && !Session.CatalogsRunning && Session.TourSolveIssue is null);
+        Note(generation, value: () => Session.TourSolveIssue ?? string.Empty, warning: true);
         _refreshControls.Add(() => generate.Content = Session.HasWcs ? "Generate Tour" : "Solve & Generate Tour");
         var candidate = new StackPanel { Spacing = 8 };
         generation.Children.Add(candidate);
@@ -612,13 +649,13 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             Button(fly, "Pick Destination", BeginPickDestination);
             Button(fly, "Use Image Center", () => Session.Edit(c => { c.Focus = Center(); c.FocusName = "Image center"; }));
             DestinationCoordinates(fly);
-            Slider(fly, "Dolly", () => Composition.Dolly, value => Session.Edit(c => c.Dolly = value), 0, 0.95);
+            DollyControl(fly, () => Composition.Dolly, value => Session.Edit(c => c.Dolly = value));
             Slider(fly, "Pan", () => Composition.Pan, value => Session.Edit(c => c.Pan = value));
             Number(fly, "Start roll (°)", () => Composition.RotationStart, value => Session.Edit(c => c.RotationStart = value));
             Number(fly, "End roll (°)", () => Composition.Rotation, value => Session.Edit(c => c.Rotation = value));
             RollExplanation(fly);
-            Number(fly, "Opening zoom", () => Composition.Zoom, value => Session.Edit(c => c.Zoom = value), 1, step: 0.1);
-            Number(fly, "End lens multiplier", () => Composition.ZoomEnd, value => Session.Edit(c => c.ZoomEnd = value), 1, step: 0.1);
+            ZoomControl(fly, "Opening zoom", () => Composition.Zoom, value => Session.Edit(c => c.Zoom = value));
+            ZoomControl(fly, "End lens multiplier", () => Composition.ZoomEnd, value => Session.Edit(c => c.ZoomEnd = value));
             Number(fly, "Sideways swing", () => Composition.Truck, value => Session.Edit(c => c.Truck = value), step: 0.01);
             Number(fly, "Swing direction (°)", () => Composition.TruckAngleDegrees,
                 value => Session.Edit(c => c.TruckAngleDegrees = value));
@@ -636,7 +673,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             Note(stop, "An image with transparency shown during this stop in place of its title, whether or not titles are shown. Make it the video's size for sharp lettering.");
             Button(stop, "Pick Destination", BeginPickDestination);
             Button(stop, "Use Whole Image", () => Session.EditStop(s =>
-            { s.Focus = null; s.Name = "Whole Image"; s.Dolly = 0; s.Zoom = 1; s.Pan = 0; s.DepthParsecs = null; }));
+            { s.Focus = null; s.Name = "Whole Image"; s.Dolly = 0; s.Zoom = 1; s.Pan = 0; s.DepthParsecs = null; s.PullBackToWholeImage = false; }));
             DestinationCoordinates(stop);
             OptionalDistance(stop, "Set target plane distance", "Target depth (pc)", () => SelectedStop()?.DepthParsecs,
                 value => Session.EditStop(s => s.DepthParsecs = value),
@@ -647,8 +684,16 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             Number(stop, "Hold (s)", () => SelectedStop()?.Hold ?? 0,
                 value => Session.EditStop(s => s.Hold = value), 0, 600, 0.1);
             Note(stop, "Set hold to 0 to pass straight through. Glide, spin and push can keep a held stop moving.");
-            Slider(stop, "Dolly", () => SelectedStop()?.Dolly ?? 0, value => Session.EditStop(s => s.Dolly = value), 0, 0.95);
-            Number(stop, "Zoom", () => SelectedStop()?.Zoom ?? 1, value => Session.EditStop(s => s.Zoom = value), 0, step: 0.1);
+            DollyControl(stop, () => SelectedStop()?.Dolly ?? 0, value => Session.EditStopCamera(s => s.Dolly = value));
+            ZoomControl(stop, "Zoom", () => SelectedStop()?.Zoom ?? 1, value => Session.EditStopCamera(s => s.Zoom = value), 0.1);
+            Button(stop, "Pull Back", Session.PullBackStop, () => ParallaxCore.SupportsPullBackToWholeImage);
+            Note(stop, ParallaxCore.SupportsPullBackToWholeImage ?
+                "Pull Back widens toward the whole image, keeping this target, its depth and timing. Tighter Dolly/Zoom views return toward the target." :
+                "Whole-image pull-back needs a native core containing Seiza #283; this core keeps authored point-centred framing.");
+            var wide = new StackPanel { Spacing = 8 }; stop.Children.Add(wide);
+            Note(wide, "Fill Frame may increase fitted zoom to hide image edges. Show Whole Image preserves a wider stop and permits black space; this changes framing for the entire video.");
+            Button(wide, "Show Whole Image for Entire Video", () => Session.Edit(c => c.Framing = "fit"), () => ParallaxCore.SupportsFraming);
+            _refreshControls.Add(() => wide.Visibility = SelectedStop()?.Zoom < 1 && Composition.Framing == "fill" ? Visibility.Visible : Visibility.Collapsed);
             Slider(stop, "Pan", () => SelectedStop()?.Pan ?? 0, value => Session.EditStop(s => s.Pan = value));
             Number(stop, "Roll (°)", () => SelectedStop()?.RotateDegrees ?? 0, value => Session.EditStop(s => s.RotateDegrees = value));
             StackPanel turns = ButtonRow(stop);
@@ -677,7 +722,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         if (Composition.Motion == ParallaxMotion.Tour)
         {
             StackPanel tour = Section("Tour motion");
-            Number(tour, "Overall zoom", () => Composition.Zoom, value => Session.Edit(c => c.Zoom = value), 1, step: 0.1);
+            ZoomControl(tour, "Overall zoom", () => Composition.Zoom, value => Session.Edit(c => c.Zoom = value));
             Note(tour, "Multiplies every stop’s zoom, including the opening stop.");
             Number(tour, "Glide through holds", () => Composition.TourGlide, value => Session.Edit(c => c.TourGlide = value), 0, step: 0.1);
             Note(tour, "A fraction of travel speed: 0 pauses, 0.2 glides gently. Spinning stops turn around their own destination.");
@@ -757,9 +802,56 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         Note(cards, "Images with transparency, fitted inside the frame and centred: make them the video's size for sharp lettering. The opening card shows from the first frame and fades out; the closing card fades in for the end. A looping tour shows both across its join, so it still loops. A tour stop can carry a card of its own.");
     }
 
+    private void BuildCropInspector()
+    {
+        StackPanel crop = Section("Filmed crop");
+        Note(crop, "The source, layers, dust maps and WCS stay untouched. Cropping rebuilds the scene; camera points and labels retain their source positions.");
+        if (!Session.SourceReady || Session.Width < 16 || Session.Height < 16)
+        { Note(crop, "Cropping needs a ready source at least 16 pixels each way."); return; }
+        bool Available() => ParallaxCore.SupportsFraming && Session.SourceReady;
+        Button(crop, "Draw Crop on Source", () =>
+        {
+            Session.ShowsSource = true; Session.PickingCrop = true;
+            Session.PickingDestination = Session.PickingDistance = false;
+            _cropAnchor = null; _cropDraft = null;
+        }, Available);
+        Toggle(crop, "Lock crop to frame shape", () => _lockCropAspect, value => _lockCropAspect = value, Available);
+        int[] Draft() => _cropNumericDraft ?? Session.FilmedRectangle;
+        void Change(int axis, double value)
+        {
+            _cropNumericDraft ??= Session.FilmedRectangle;
+            _cropNumericDraft[axis] = Integer(value);
+            if (_lockCropAspect && axis is 2 or 3)
+            {
+                var size = Composition.OutputDimensions;
+                double aspect = (double)size.Width / size.Height;
+                if (axis == 2) _cropNumericDraft[3] = (int)Math.Round(value / aspect);
+                else _cropNumericDraft[2] = (int)Math.Round(value * aspect);
+            }
+        }
+        Number(crop, "Crop X (source px)", () => Draft()[0], value => Change(0, value), 0, Session.Width - 16, enabled: Available);
+        Number(crop, "Crop Y (source px)", () => Draft()[1], value => Change(1, value), 0, Session.Height - 16, enabled: Available);
+        Number(crop, "Crop width", () => Draft()[2], value => Change(2, value), 16, Session.Width, enabled: Available);
+        Number(crop, "Crop height", () => Draft()[3], value => Change(3, value), 16, Session.Height, enabled: Available);
+        Button(crop, "Apply Crop Values", () =>
+        {
+            Session.SetCrop(Draft());
+            if (Session.Error is null) _cropNumericDraft = null;
+        }, Available);
+        Button(crop, "Use Entire Source", () => { Session.SetCrop(null); _cropNumericDraft = null; });
+        if (!ParallaxCore.SupportsFraming) Note(crop, "Cropping requires Seiza 0.32.0 or newer.");
+    }
+
     private void BuildOutputInspector()
     {
         StackPanel output = Section("Video");
+        var framing = Choice(output, "Framing", () => Composition.Framing, value => Session.Edit(c => c.Framing = value),
+            ("fill", "Fill frame"), ("fit", "Show whole image (letterbox)"));
+        _refreshControls.Add(() => framing.IsEnabled = ParallaxCore.SupportsFraming);
+        Note(output, ParallaxCore.SupportsFraming ? "Fill may trim the image. Show whole image keeps its edges visible, with black beside it." :
+            "Whole-image framing and cropping become available with Seiza 0.32.0.");
+        Toggle(output, "Match image shape", () => Composition.MatchImageShape,
+            value => Session.Edit(c => { c.MatchImageShape = value; c.ImageLongSide = Math.Clamp(Math.Max(c.Width, c.Height) / 2 * 2, 16, 3840); }), () => Session.SourceReady);
         Choice(output, "Output format", () => Session.ExportFormat, value => Session.ExportFormat = value,
             (ParallaxExportFormat.Mp4, "MP4 (native Windows)"), (ParallaxExportFormat.Mov, "MOV (FFmpeg)"),
             (ParallaxExportFormat.Matroska, "Matroska / MKV (FFmpeg)"), (ParallaxExportFormat.PngSequence, "PNG sequence"));
@@ -778,10 +870,12 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         {
             ("720p", 1280, 720), ("1080p", 1920, 1080), ("1440p", 2560, 1440), ("4K", 3840, 2160),
         })
-            Button(sizes, name, () => Session.Edit(c => { c.Width = width; c.Height = height; }));
-        Button(output, "Swap Orientation", () => Session.Edit(c => (c.Width, c.Height) = (c.Height, c.Width)));
-        Number(output, "Width", () => Composition.Width, value => Session.Edit(c => c.Width = Integer(value)), 16, 3840, 2);
-        Number(output, "Height", () => Composition.Height, value => Session.Edit(c => c.Height = Integer(value)), 16, 3840, 2);
+            Button(sizes, name, () => Session.Edit(c => { c.Width = width; c.Height = height; c.ImageLongSide = width; }));
+        Button(output, "Swap Orientation", () => Session.Edit(c => (c.Width, c.Height) = (c.Height, c.Width)), () => !Composition.MatchImageShape);
+        Number(output, "Width", () => Composition.OutputDimensions.Width, value => Session.Edit(c => c.Width = Integer(value)), 16, 3840, 2, () => !Composition.MatchImageShape);
+        Number(output, "Height", () => Composition.OutputDimensions.Height, value => Session.Edit(c => c.Height = Integer(value)), 16, 3840, 2, () => !Composition.MatchImageShape);
+        Note(output, value: () => $"Export frame: {Composition.OutputDimensions.Width} × {Composition.OutputDimensions.Height} pixels. Match title-card artwork to this size.");
+        Note(output, value: () => Session.Summary is { } summary ? $"Prepared frame: {summary.Width} × {summary.Height} pixels (preview is scaled down)." : "Prepare Preview to check the framing.");
         Choice(output, "Frames per second", () => Composition.Fps, value => Session.Edit(c => c.Fps = value),
             (24, "24"), (30, "30"), (60, "60"));
         Choice(output, "Codec", () => Session.Codec, value => Session.Codec = value,
@@ -856,7 +950,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         return new Rect((PreviewSurface.ActualWidth - width) / 2, (PreviewSurface.ActualHeight - height) / 2, width, height);
     }
 
-    private double[] Center() => [Math.Max(0, Session.Width - 1) / 2.0, Math.Max(0, Session.Height - 1) / 2.0];
+    private double[] Center() => Session.ImageCenter;
     private ParallaxStop? SelectedStop() => Session.SelectedIndex is int index && index >= 0 && index < Composition.Stops.Count ? Composition.Stops[index] : null;
     private double[]? CurrentFocus() => Session.PickingDistance ? Composition.Scene.DistanceFocus :
         Composition.Motion == ParallaxMotion.Tour ? SelectedStop()?.Focus : Composition.Focus;
@@ -879,33 +973,81 @@ public sealed partial class ParallaxWindow : Window, IDisposable
 
     private void BeginPickDestination()
     {
+        Session.PickingCrop = false;
         Session.PickingDistance = false; Session.ShowsSource = true; Session.PickingDestination = true;
     }
 
     private void UpdateFocusMarker()
     {
+        UpdateCropOutline();
         double[]? point = CurrentFocus();
         bool show = Session.ShowsSource && point is { Length: 2 } && point.All(double.IsFinite);
         FocusMarker.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         if (!show) return;
         Rect rect = SourceRect();
-        Canvas.SetLeft(FocusMarker, rect.X + point![0] / Math.Max(1, Session.Width) * rect.Width - 15);
-        Canvas.SetTop(FocusMarker, rect.Y + point[1] / Math.Max(1, Session.Height) * rect.Height - 20);
+        Canvas.SetLeft(FocusMarker, rect.X + (point![0] + 0.5) / Math.Max(1, Session.Width) * rect.Width - 15);
+        Canvas.SetTop(FocusMarker, rect.Y + (point[1] + 0.5) / Math.Max(1, Session.Height) * rect.Height - 20);
     }
 
     private void PreviewSurface_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        if (Session.PickingCrop && !Session.IsBusy && Session.ShowsSource && SourceRect().Contains(e.GetCurrentPoint(PreviewSurface).Position))
+        {
+            _cropAnchor = SourcePoint(e.GetCurrentPoint(PreviewSurface).Position);
+            PreviewSurface.CapturePointer(e.Pointer); e.Handled = true; return;
+        }
         if (Session.IsBusy || !Session.ShowsSource || (!Session.PickingDestination && !Session.PickingDistance)) return;
         Point position = e.GetCurrentPoint(PreviewSurface).Position;
         Rect rect = SourceRect();
         if (rect.Width <= 0 || rect.Height <= 0 || !rect.Contains(position)) return;
-        Session.Pick(Math.Clamp((position.X - rect.X) / rect.Width * Session.Width, 0, Math.Max(0, Session.Width - 1)),
-            Math.Clamp((position.Y - rect.Y) / rect.Height * Session.Height, 0, Math.Max(0, Session.Height - 1)));
+        Session.Pick(Math.Clamp((position.X - rect.X) / rect.Width * Session.Width - 0.5, 0, Math.Max(0, Session.Width - 1)),
+            Math.Clamp((position.Y - rect.Y) / rect.Height * Session.Height - 0.5, 0, Math.Max(0, Session.Height - 1)));
         e.Handled = true;
         Refresh();
     }
 
     private void PreviewSurface_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateFocusMarker();
+    private double[] SourcePoint(Point position)
+    {
+        Rect rect = SourceRect();
+        return [Math.Clamp((position.X - rect.X) / Math.Max(1, rect.Width) * Session.Width, 0, Session.Width),
+            Math.Clamp((position.Y - rect.Y) / Math.Max(1, rect.Height) * Session.Height, 0, Session.Height)];
+    }
+    private void PreviewSurface_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_cropAnchor is null || !Session.PickingCrop || Session.IsBusy) return;
+        double[] end = SourcePoint(e.GetCurrentPoint(PreviewSurface).Position);
+        var size = Composition.OutputDimensions;
+        _cropDraft = ParallaxGeometry.CropFromDrag(_cropAnchor[0], _cropAnchor[1], end[0], end[1],
+            Session.Width, Session.Height, _lockCropAspect ? (double)size.Width / size.Height : null);
+        UpdateCropOutline(); e.Handled = true;
+    }
+    private void PreviewSurface_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_cropAnchor is null) return;
+        PreviewSurface_PointerMoved(sender, e);
+        int[]? crop = _cropDraft;
+        _cropAnchor = null; _cropDraft = null; _cropNumericDraft = null;
+        if (crop is not null) Session.SetCrop(crop);
+        PreviewSurface.ReleasePointerCaptures(); e.Handled = true; Refresh();
+    }
+    private void PreviewSurface_PointerCanceled(object sender, PointerRoutedEventArgs e)
+    {
+        _cropAnchor = null; _cropDraft = null; Session.PickingCrop = false;
+        UpdateCropOutline();
+    }
+    private void UpdateCropOutline()
+    {
+        int[]? crop = _cropDraft ?? Composition.Scene.Crop;
+        bool show = Session.ShowsSource && crop is { Length: 4 } && Session.Width > 0 && Session.Height > 0;
+        CropOutline.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (!show) return;
+        Rect rect = SourceRect();
+        Canvas.SetLeft(CropOutline, rect.X + crop![0] * rect.Width / Session.Width);
+        Canvas.SetTop(CropOutline, rect.Y + crop[1] * rect.Height / Session.Height);
+        CropOutline.Width = crop[2] * rect.Width / Session.Width;
+        CropOutline.Height = crop[3] * rect.Height / Session.Height;
+    }
     private void InspectorPicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_refreshing || InspectorPanel is null) return;

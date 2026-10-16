@@ -23,13 +23,17 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     private readonly List<ParallaxComposition> _undo = [], _redo = [];
     private readonly List<string> _warnings = [], _notes = [];
     private WcsResult? _wcs;
+    private readonly Func<SolveResult?>? _readDocumentSolve;
+    private readonly Action<SolveResult>? _publishDocumentSolve;
+    private SolveResult? _lastDocumentSolve;
+    public SolveResult? SolveInformation { get; private set; }
     private ParallaxVideo? _scene, _preview;
     private string? _starless, _stars, _starlessSourcePath, _starsSourcePath, _paintedDustMapPath;
     private CancellationTokenSource? _operation, _refit, _playback;
     private Task? _refitTask, _frameTask;
     private int _revision, _frameRevision, _activeJobs, _catalogStatusRevision;
     private int? _pendingFrame;
-    private bool _closed, _refitRequested, _automaticPreview = true, _layersAligned, _automaticSeparation;
+    private bool _closed, _refitRequested, _automaticPreview = true, _layersAligned = true, _automaticSeparation, _sourceIsStarless;
     private double _playhead;
     private readonly CatalogSettingsViewModel _catalogs = CatalogSettingsViewModel.Instance;
 
@@ -43,7 +47,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public RenderedImageData? SourceImage { get; private set; }
     public RenderedImageData? PreviewImage { get; private set; }
     public bool SourceReady { get; private set; }
-    public bool HasWcs => _wcs is not null;
+    public bool HasWcs => _wcs is not null || _readDocumentSolve?.Invoke() is not null;
     public bool HasScene => _scene is not null;
     public bool HasPreview => _preview is not null;
     public bool IsBusy { get; private set; } = true;
@@ -61,7 +65,25 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public bool ShowsSource { get; set; } = true;
     public bool PickingDestination { get; set; }
     public bool PickingDistance { get; set; }
+    public bool PickingCrop { get; set; }
+    public int[] FilmedRectangle => Composition.Scene.Crop?.ToArray() ?? [0, 0, Width, Height];
+    public double[] ImageCenter => [FilmedRectangle[0] + (FilmedRectangle[2] - 1) / 2.0,
+        FilmedRectangle[1] + (FilmedRectangle[3] - 1) / 2.0];
+    public string? ValidationMessage => Composition.ValidationMessage ??
+        (Composition.Stops.Any(stop => stop.PullBackToWholeImage) && !ParallaxCore.SupportsPullBackToWholeImage
+            ? "Whole-image pull-back requires a native core containing Seiza #283." : null) ??
+        ((Composition.Scene.Crop is not null || Composition.Framing == "fit") && !ParallaxCore.SupportsFraming
+            ? "Cropping and whole-image framing require Seiza 0.32.0 or newer." : null);
     public bool LayersAligned { get => _layersAligned; set { if (_layersAligned == value) return; _layersAligned = value; Invalidate(true); } }
+    public string? TourSolveIssue => ParallaxRequestSource.SolveIssue(HasWcs, _sourceIsStarless, AutomaticSeparation ? null : _stars, LayersAligned);
+    public string SolvingDescription => SolveInformation?.SourceDescription ?? (HasWcs ? "Sky coordinates available" :
+        _sourceIsStarless ? TourSolveIssue ?? "The aligned Stars layer will be solved directly; the starless original and snapshot will not be solved." :
+        "The original astronomy file's headers are tried before solving the private stars/snapshot.");
+    public string? PreparationIssue => !SourceReady ? "Wait for the source snapshot to finish loading." :
+        _catalogs.IsRunning ? "Wait for catalogue setup to finish." :
+        AutomaticSeparation ? (!_inputs.ContainsKey(ParallaxInputFile.Separator) ? "Choose the StarXTerminator executable in Source." : ValidationMessage ?? TourSolveIssue) :
+        _starless is null || _stars is null ? "Choose both Starless and Stars images in Source." :
+        !LayersAligned ? "Enable Layers match source alignment and stretch in Source to prepare the selected pair." : ValidationMessage;
     public bool AutomaticSeparation { get => _automaticSeparation; set { if (_automaticSeparation == value) return; _automaticSeparation = value; Invalidate(true); } }
     public bool AutomaticPreview
     {
@@ -71,8 +93,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public double Playhead { get => _playhead; set { _playhead = double.IsFinite(value) ? Math.Clamp(value, 0, Math.Max(0, Composition.Duration)) : 0; Notify(nameof(Playhead)); } }
     public bool CanUndo => !IsBusy && _undo.Count > 0;
     public bool CanRedo => !IsBusy && _redo.Count > 0;
-    public bool CanPrepare => SourceReady && !IsBusy && !_closed && !_catalogs.IsRunning && Composition.ValidationMessage is null &&
-        (AutomaticSeparation ? _inputs.ContainsKey(ParallaxInputFile.Separator) : _starless is not null && _stars is not null && LayersAligned);
+    public bool CanPrepare => !IsBusy && !_closed && PreparationIssue is null;
     public ParallaxTourOptions TourOptions { get; set; } = new();
     public ParallaxTourPlan? Candidate { get; private set; }
     public ParallaxVideoCodec Codec { get; set; }
@@ -86,9 +107,12 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public string CatalogDirectoryPath { get; private set; } = "Checking the default location…";
     public bool CatalogsRunning => _catalogs.IsRunning;
 
-    public ParallaxSession(string sourcePath, FitsImageProcessingConfiguration processing, WcsResult? wcs, DispatcherQueue dispatcher)
+    public ParallaxSession(string sourcePath, FitsImageProcessingConfiguration processing, WcsResult? wcs, DispatcherQueue dispatcher,
+        Func<SolveResult?>? readDocumentSolve = null, Action<SolveResult>? publishDocumentSolve = null)
     {
         _sourcePath = sourcePath; _processing = processing; _wcs = wcs; _dispatcher = dispatcher;
+        _readDocumentSolve = readDocumentSolve; _publishDocumentSolve = publishDocumentSolve;
+        SolveInformation = _lastDocumentSolve = readDocumentSolve?.Invoke();
         _protectedInputHistory.Remember([sourcePath]);
         CatalogSettingsStore.CatalogDirectoryChanged += CatalogDirectoryChanged;
         _catalogs.PropertyChanged += CatalogChanged;
@@ -119,6 +143,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
             var preview = await Task.Run(() => SeizaCore.Render(SnapshotPath, 1280));
             if (_closed) return;
             SourceImage = preview;
+            Composition.SourceWidth = Width; Composition.SourceHeight = Height;
             Composition.Scene.DistanceFocus = [(Width - 1) / 2.0, (Height - 1) / 2.0];
             SourceReady = true; Status = "Choose aligned starless and unscreened stars images.";
             await RefreshCatalogStatusAsync();
@@ -142,6 +167,28 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         if (previous.Scene.GaiaMaxMagnitude != updated.Scene.GaiaMaxMagnitude) _ = RefreshCatalogStatusAsync();
     }
     public void EditStop(Action<ParallaxStop> edit) { if (SelectedIndex is int i) Edit(c => edit(c.Stops[i])); }
+    public void EditStopCamera(Action<ParallaxStop> edit) => EditStop(stop =>
+    {
+        if (ParallaxCore.SupportsPullBackToWholeImage) stop.EditCamera(edit);
+        else edit(stop);
+    });
+    public void SetCrop(int[]? crop)
+    {
+        if (_closed || IsBusy || !SourceReady) return;
+        if (!ParallaxGeometry.CropInside(crop, Width, Height))
+        { Error = "The crop must lie inside the source and be at least 16 pixels each way."; Notify(); return; }
+        if (crop is not null && !ParallaxCore.SupportsFraming)
+        { Error = "Video cropping requires Seiza 0.32.0 or newer."; Notify(); return; }
+        Edit(c =>
+        {
+            c.Scene.Crop = crop?.ToArray();
+            int[] area = crop ?? [0, 0, Width, Height];
+            double[] center = [area[0] + (area[2] - 1) / 2.0, area[1] + (area[3] - 1) / 2.0];
+            if (c.DistanceName == "Image center") c.Scene.DistanceFocus = center;
+            if (c.FocusName == "Image center" && c.Focus is not null) c.Focus = center.ToArray();
+        });
+        PickingCrop = false; Error = null; Notify();
+    }
     public void Undo() => Restore(_undo, _redo);
     public void Redo() => Restore(_redo, _undo);
     private void Restore(List<ParallaxComposition> from, List<ParallaxComposition> to)
@@ -186,11 +233,12 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
             string copy = Path.Combine(_directory, Guid.NewGuid().ToString("N") + Path.GetExtension(path));
             await Task.Run(() => File.Copy(path, copy));
             if (_closed) return;
-            if (starless) { _starless = copy; _starlessSourcePath = Path.GetFullPath(path); StarlessName = Path.GetFileName(path); }
+            if (starless) { _starless = copy; _starlessSourcePath = Path.GetFullPath(path); StarlessName = Path.GetFileName(path);
+                _sourceIsStarless |= ParallaxRequestSource.SameSource(_sourcePath, path); }
             else { _stars = copy; _starsSourcePath = Path.GetFullPath(path); StarsName = Path.GetFileName(path); }
             _protectedInputHistory.Remember([path]);
-            _layersAligned = false; Invalidate(true);
-            Status = "Confirm that both layers match the source alignment and stretch.";
+            Invalidate(true);
+            Status = PreparationIssue ?? "Layers ready. Prepare Preview or generate a tour.";
         }
         catch (Exception e) { if (!_closed) Error = e.Message; }
         finally { IsBusy = false; JobFinished(); Notify(); }
@@ -388,9 +436,12 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     private void KeepPlanes(ParallaxRequest request, ParallaxSummary summary) =>
         ScenePlanes = request.Scene.AutoPlanes || request.Scene.Planes is { Count: > 0 } ? summary.Planes : null;
 
-    public void PickDistanceReference() { PickingDestination = false; PickingDistance = true; ShowsSource = true; Notify(); }
+    public void PickDistanceReference() { PickingCrop = false; PickingDestination = false; PickingDistance = true; ShowsSource = true; Notify(); }
     public void Pick(double x, double y)
     {
+        int[] crop = FilmedRectangle;
+        if (x < crop[0] || y < crop[1] || x > crop[0] + crop[2] - 1 || y > crop[1] + crop[3] - 1)
+        { Error = "Pick a point inside the filmed crop."; Notify(); return; }
         if (PickingDistance) { Edit(c => { c.Scene.DistanceFocus = [x, y]; c.DistanceName = "Custom point"; }); PickingDistance = false; }
         else if (PickingDestination)
         {
@@ -402,33 +453,44 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     }
     public void AddStop(bool whole = false)
     {
-        var stop = new ParallaxStop { Name = whole ? "Whole Image" : "Custom Point", Focus = whole ? null : [Width / 2.0, Height / 2.0], Dolly = whole ? 0 : 0.4 };
+        if (IsBusy || _closed) return;
+        var stop = new ParallaxStop { Name = whole ? "Whole Image" : "Custom Point", Focus = whole ? null : ImageCenter,
+            Dolly = 0, Zoom = 1, PullBackToWholeImage = !whole && ParallaxCore.SupportsPullBackToWholeImage };
         stop.RotateDegrees = SelectedIndex is int i ? Composition.Stops[i].RotateDegrees : 0;
         int index = SelectedIndex is int j ? j + 1 : Composition.Stops.Count;
-        Edit(c => c.Stops.Insert(index, stop)); SelectedStop = stop.Id; Notify();
+        Edit(c => c.Stops.Insert(index, stop)); SelectStop(stop.Id);
     }
     public void DuplicateStop()
     {
-        if (SelectedIndex is not int i) return;
+        if (IsBusy || _closed || SelectedIndex is not int i) return;
         var stop = Composition.Stops[i].DeepClone() with { Id = Guid.NewGuid() };
-        Edit(c => c.Stops.Insert(i + 1, stop)); SelectedStop = stop.Id; Notify();
+        Edit(c => c.Stops.Insert(i + 1, stop)); SelectStop(stop.Id);
     }
     public void MoveStop(int offset)
     {
-        if (SelectedIndex is not int i || i + offset < 0 || i + offset >= Composition.Stops.Count) return;
+        if (IsBusy || _closed || SelectedIndex is not int i || i + offset < 0 || i + offset >= Composition.Stops.Count) return;
         Edit(c => { var stop = c.Stops[i]; c.Stops.RemoveAt(i); c.Stops.Insert(i + offset, stop); });
+        SelectStop(Composition.Stops[i + offset].Id);
     }
     public void RemoveStop()
     {
-        if (SelectedIndex is not int i || Composition.Stops.Count <= 2) return;
-        Edit(c => c.Stops.RemoveAt(i)); SelectedStop = Composition.Stops[Math.Min(i, Composition.Stops.Count - 1)].Id; Notify();
+        if (IsBusy || _closed || SelectedIndex is not int i || Composition.Stops.Count <= 2) return;
+        Edit(c => c.Stops.RemoveAt(i)); SelectStop(Composition.Stops[Math.Min(i, Composition.Stops.Count - 1)].Id);
+    }
+    public void PullBackStop()
+    {
+        if (IsBusy || _closed || SelectedStop is not Guid id) return;
+        if (!ParallaxCore.SupportsPullBackToWholeImage)
+        { Error = "Whole-image pull-back requires a native core containing Seiza #283."; Notify(); return; }
+        EditStop(s => s.PullBack());
+        SelectStop(id);
     }
     public void SelectStop(Guid id) { SelectedStop = id; if (SelectedIndex is int i) Playhead = Composition.ArrivalAt(i); RequestFrame(); Notify(); }
 
     private ParallaxRequest Request(bool preview)
     {
         if (!SourceReady) throw new InvalidOperationException("The source snapshot is not ready.");
-        if (Composition.ValidationMessage is string message) throw new InvalidDataException(message);
+        if (ValidationMessage is string message) throw new InvalidDataException(message);
         string cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Seiza", "ParallaxDistances");
         Directory.CreateDirectory(cache);
         return ParallaxRequestSource.Create(Composition, preview, SnapshotPath, AutomaticSeparation, _starless, _stars,
@@ -444,6 +506,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     }
     private (CancellationTokenSource Cancellation, int Revision) Begin(string message)
     {
+        PickingCrop = false;
         StopPlayback(); _refit?.Cancel(); _refitRequested = false; _revision++;
         IsBusy = true; Status = message; Progress = null; Error = null; _warnings.Clear(); _notes.Clear();
         Activity = new(message);
@@ -473,6 +536,8 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public async Task GenerateTourAsync()
     {
         if (!SourceReady || IsBusy || _closed || _catalogs.IsRunning) return;
+        RefreshDocumentSolution();
+        if (TourSolveIssue is { } issue) { Error = Status = issue; Notify(); return; }
         if (!double.IsFinite(TourOptions.Hold) || TourOptions.Hold < 0 || !double.IsFinite(TourOptions.Motion) || TourOptions.Motion < 0) { Error = "Tour hold and motion must be finite and nonnegative."; Notify(); return; }
         // A prepared scene plans each stop at the depth it shows its target at,
         // with no solve, for the full output frame. The scene keeps the
@@ -484,7 +549,8 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
             var (sceneSignal, sceneGeneration) = Begin("Planning tour on the prepared scene…");
             try
             {
-                var plan = await ParallaxCore.PlanOnSceneAsync(scene, size, options, sceneSignal.Token);
+                var plan = (await ParallaxCore.PlanOnSceneAsync(scene, size, options, Composition.Framing, sceneSignal.Token))
+                    .InSourceCoordinates(Composition.Scene.Crop);
                 if (!_closed && sceneGeneration == _revision) { Candidate = plan; Status = $"Generated {plan.Tour.Count} stops on the prepared scene. Apply the tour or keep your draft."; }
                 Finish(sceneSignal, null);
             }
@@ -497,10 +563,9 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         var (signal, generation) = Begin(HasWcs ? "Planning tour…" : "Solving image and planning tour…");
         try
         {
-            await ParallaxRequestSource.EnsureWcsAsync(request,
-                path => Task.Run(() => SeizaCore.Solve(path, request.Inputs.CatalogDirectory, request.Scene.MinimumScaleArcsecPerPixel, request.Scene.MaximumScaleArcsecPerPixel).Wcs),
-                signal.Token);
-            var plan = await ParallaxCore.PlanAsync(request, events: Events(generation), cancellationToken: signal.Token);
+            await ResolveSolutionAsync(request, generation, signal.Token);
+            var plan = (await ParallaxCore.PlanAsync(request, events: Events(generation), cancellationToken: signal.Token))
+                .InSourceCoordinates(Composition.Scene.Crop);
             if (!_closed && generation == _revision) { _wcs = request.Inputs.Wcs; Candidate = plan; Status = $"Generated {plan.Tour.Count} stops. Apply the tour or keep your draft."; }
             Finish(signal, null);
         }
@@ -510,7 +575,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     {
         if (Candidate is not { } plan) return;
         Edit(c => c.ApplyTour(plan));
-        SelectedStop = plan.Tour[0].Id; Candidate = null; Notify();
+        Candidate = null; SelectStop(plan.Tour[0].Id);
     }
     public void DiscardCandidate() { Candidate = null; Notify(); }
     public async Task LoadTourAsync(string path)
@@ -519,6 +584,11 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         {
             if (new FileInfo(path).Length > 4 * 1024 * 1024) throw new InvalidDataException("The tour JSON exceeds the 4 MiB limit.");
             var plan = ParallaxTourPlan.FromJson(await File.ReadAllTextAsync(path), path);
+            int[]? crop = plan.Crop ?? Composition.Scene.Crop;
+            if (!ParallaxGeometry.CropInside(crop, Width, Height)) throw new InvalidDataException("The tour's crop lies outside this source image.");
+            plan = plan.InSourceCoordinates(crop);
+            if (crop is [0, 0, var cropWidth, var cropHeight] && cropWidth == Width && cropHeight == Height)
+                plan = plan with { Crop = null };
             Candidate = plan; Status = "Tour loaded. Apply it to replace the current draft.";
         }
         catch (Exception e) { Error = e.Message; }
@@ -529,7 +599,8 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         try
         {
             if (Composition.ValidationMessage is string error) throw new InvalidDataException(error);
-            var plan = new ParallaxTourPlan { Focus = Composition.Scene.DistanceFocus ?? [(Width - 1) / 2.0, (Height - 1) / 2.0], FocusName = Composition.DistanceName, Seconds = Composition.Duration, Tour = Composition.Stops, TourGlide = Composition.TourGlide, TourTitles = Composition.TourTitles, TourLoop = Composition.TourLoop };
+            var plan = new ParallaxTourPlan { Focus = Composition.Scene.DistanceFocus ?? ImageCenter, FocusName = Composition.DistanceName, Seconds = Composition.Duration, Tour = Composition.Stops, TourGlide = Composition.TourGlide, TourTitles = Composition.TourTitles, TourLoop = Composition.TourLoop }
+                .InCropCoordinates(FilmedRectangle);
             string stage = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, ".seiza-tour-" + Guid.NewGuid().ToString("N") + ".json");
             try { await File.WriteAllTextAsync(stage, plan.ToJson(path)); File.Move(stage, path, true); }
             finally { File.Delete(stage); }
@@ -539,12 +610,14 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     }
     public async Task PreparePreviewAsync()
     {
+        RefreshDocumentSolution();
         if (!CanPrepare) return;
         if (_scene is not null) { ScheduleRefit(true); return; }
         ParallaxRequest request = Request(true);
         var (signal, generation) = Begin(HasWcs ? "Loading images and finding stars…" : "Loading images, solving sky coordinates and finding stars…");
         try
         {
+            await ResolveSolutionAsync(request, generation, signal.Token);
             var video = await ParallaxCore.PrepareAsync(request, events: Events(generation), cancellationToken: signal.Token);
             if (_closed || generation != _revision) video.Dispose();
             else
@@ -645,6 +718,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public void StopPlayback() { IsPlaying = false; _playback?.Cancel(); _playback?.Dispose(); _playback = null; Notify(nameof(IsPlaying)); }
     public async Task ExportVideoAsync(string destination)
     {
+        RefreshDocumentSolution();
         if (!CanPrepare) return;
         ParallaxRequest request = Request(false); ParallaxVideo? existing = _scene;
         var options = new ParallaxExportOptions(ExportFormat, Codec, FfmpegPath);
@@ -665,6 +739,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
             }
             if (options.Format == ParallaxExportFormat.PngSequence) ParallaxExportOutput.ValidateSequence(destination, preflightPaths);
             else ParallaxExportOutput.ValidateFile(destination, options.Format, preflightPaths);
+            if (existing is null) await ResolveSolutionAsync(request, generation, signal.Token);
             video = existing is null ? await ParallaxCore.PrepareAsync(request, events: Events(generation), cancellationToken: signal.Token) : await ParallaxCore.ReconfigureAsync(existing, request.Video, events: Events(generation), cancellationToken: signal.Token);
             signal.Token.ThrowIfCancellationRequested();
             if (_closed || generation != _revision) throw new OperationCanceledException();
@@ -685,6 +760,31 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     }
 
     public async Task DownloadCatalogsAsync() => await _catalogs.StartParallaxSetupAsync();
+    private void RefreshDocumentSolution()
+    {
+        if (_closed || IsBusy) return;
+        if (_readDocumentSolve?.Invoke() is not { } result || ReferenceEquals(result, _lastDocumentSolve)) return;
+        _lastDocumentSolve = SolveInformation = result; _wcs = result.Wcs;
+        Invalidate(true);
+    }
+    private async Task ResolveSolutionAsync(ParallaxRequest request, int generation, CancellationToken cancellationToken)
+    {
+        var result = await ParallaxRequestSource.EnsureSolutionAsync(request, _sourcePath,
+            path => Task.Run(() => SeizaCore.Solve(path, request.Inputs.CatalogDirectory,
+                request.Scene.MinimumScaleArcsecPerPixel, request.Scene.MaximumScaleArcsecPerPixel,
+                cancellationToken: cancellationToken)), cancellationToken,
+            sourceIsStarless: _sourceIsStarless, layersAligned: LayersAligned, snapshotPath: SnapshotPath);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_closed || generation != _revision) throw new OperationCanceledException(cancellationToken);
+        _wcs = request.Inputs.Wcs;
+        if (result is not null)
+        {
+            SolveInformation = _lastDocumentSolve = result;
+            _publishDocumentSolve?.Invoke(result);
+            if (result.IsUncheckedHeader && !_warnings.Contains(result.SourceDescription!)) _warnings.Add(result.SourceDescription!);
+            Notify();
+        }
+    }
     private async Task RefreshCatalogStatusAsync()
     {
         int generation = ++_catalogStatusRevision;

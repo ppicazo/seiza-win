@@ -27,6 +27,11 @@ internal static partial class NativeMethods
         byte sipOrder,
         out nint error);
 
+    [LibraryImport(LibraryName, EntryPoint = "seiza_solve_image_with_limits_json", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint SolveImageWithLimitsJson(string path, string? catalogDirectory,
+        double minimumScaleArcsecPerPixel, double maximumScaleArcsecPerPixel, byte sipOrder,
+        double timeLimitSeconds, SafeCancelSignalHandle cancel, out nint error);
+
     [LibraryImport(
         LibraryName,
         EntryPoint = "seiza_catalog_setup",

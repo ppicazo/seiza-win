@@ -119,7 +119,22 @@ public sealed partial class MainPage : Page, IDisposable
     private async void ParallaxVideo_Click(object sender, RoutedEventArgs e)
     {
         if (_currentPath is null || ViewModel.IsLoading) return;
-        var session = new ParallaxSession(_currentPath, CurrentProcessing(), _solveResult?.Wcs, DispatcherQueue);
+        string sourcePath = _currentPath;
+        int generation = _loadGeneration;
+        bool StillSameDocument() => generation == _loadGeneration &&
+            string.Equals(sourcePath, _currentPath, StringComparison.OrdinalIgnoreCase);
+        var session = new ParallaxSession(sourcePath, CurrentProcessing(), _solveResult?.Wcs, DispatcherQueue,
+            () => StillSameDocument() ? _solveResult : null,
+            result =>
+            {
+                if (!StillSameDocument() || ViewModel.IsSolving) return;
+                _solveResult = result;
+                _overlayScene.SolveOverlay = new SolveOverlayRenderer(result, _sourceWidth, _sourceHeight);
+                ViewModel.CompleteSolve(result);
+                InspectorControl.ShowSolveResult(result);
+                ApplyOverlayAvailability(result);
+                ImageCanvas.Invalidate();
+            });
         var window = new ParallaxWindow(session);
         App.RegisterParallaxWindow(window);
         window.OpenCatalogSettingsRequested += (_, _) => App.ShowCatalogSettings();

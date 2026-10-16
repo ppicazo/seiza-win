@@ -53,7 +53,7 @@
                     </ComboBox>
                     <TextBlock x:Name="PickingText" Grid.Column="1" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                 </Grid>
-                <Grid x:Name="PreviewSurface" Grid.Row="1" Background="Black" PointerPressed="PreviewSurface_PointerPressed" SizeChanged="PreviewSurface_SizeChanged">
+                <Grid x:Name="PreviewSurface" Grid.Row="1" Background="Black" PointerPressed="PreviewSurface_PointerPressed" PointerMoved="PreviewSurface_PointerMoved" PointerReleased="PreviewSurface_PointerReleased" PointerCanceled="PreviewSurface_PointerCanceled" PointerCaptureLost="PreviewSurface_PointerCanceled" SizeChanged="PreviewSurface_SizeChanged">
                     <Image x:Name="PreviewImage" Stretch="Uniform" />
                     <StackPanel x:Name="EmptyPreview" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" MaxWidth="360">
                         <FontIcon Glyph="&#xE768;" FontSize="36" Foreground="White" />
@@ -61,6 +61,7 @@
                         <TextBlock Text="Choose source and camera settings, then select Prepare Preview." TextWrapping="Wrap" Foreground="LightGray" TextAlignment="Center" />
                     </StackPanel>
                     <Canvas x:Name="MarkerCanvas" IsHitTestVisible="False">
+                        <Rectangle x:Name="CropOutline" Stroke="Lime" StrokeThickness="2" Visibility="Collapsed" />
                         <TextBlock x:Name="FocusMarker" Text="＋" FontSize="30" Foreground="Orange" Visibility="Collapsed" />
                     </Canvas>
                 </Grid>

@@ -123,11 +123,12 @@ public partial class MainPageViewModel : ObservableObject
         HasSolution = true;
         SolveErrorMessage = null;
         NeedsCatalogSetup = false;
-        SolveTitleText = $"Solved in {result.ElapsedMilliseconds / 1000.0:0.00}s";
+        SolveTitleText = result.IsUncheckedHeader ? "Header coordinates — unverified" :
+            $"Solved in {result.ElapsedMilliseconds / 1000.0:0.00}s";
         SolveCoordinatesText =
             $"RA {result.CenterRaDegrees:N5} deg, Dec {result.CenterDecDegrees:N5} deg  -  " +
             $"{result.ScaleArcsecPerPixel:N2} arcsec/px";
-        SolveQualityText =
+        SolveQualityText = result.IsUncheckedHeader ? "No stars confirmed these header coordinates." :
             $"{result.MatchedStars:N0} matched / {result.DetectedStars:N0} detected  -  " +
             $"RMS {result.RmsArcsec:N2} arcsec";
 

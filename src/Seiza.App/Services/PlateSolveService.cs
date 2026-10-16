@@ -28,7 +28,7 @@ internal static class PlateSolveService
                     throw new CatalogNotReadyException(status.Directory);
                 }
 
-                return SeizaCore.Solve(path, catalogDirectory);
+                return SeizaCore.Solve(path, catalogDirectory, cancellationToken: cancellationToken);
             });
             cancellationToken.ThrowIfCancellationRequested();
             return result;
