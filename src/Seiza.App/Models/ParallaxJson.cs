@@ -40,9 +40,10 @@ internal static class ParallaxJson
 
     // {"size": "WIDTHxHEIGHT", "autoTour": {targets, hold, motion}} for a tour
     // planned on a prepared scene.
-    internal static string SerializeSceneTourSettings(string size, ParallaxTourOptions options) => WriteObject(writer =>
+    internal static string SerializeSceneTourSettings(string size, ParallaxTourOptions options, string? framing = null) => WriteObject(writer =>
     {
         writer.WriteString("size", size);
+        if (framing is not null) writer.WriteString("framing", framing);
         writer.WritePropertyName("autoTour");
         JsonSerializer.Serialize(writer, options, ParallaxJsonContext.Default.ParallaxTourOptions);
     });

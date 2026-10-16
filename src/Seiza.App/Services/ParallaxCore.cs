@@ -9,11 +9,28 @@ namespace Seiza.App.Services;
 
 internal static class ParallaxCore
 {
+    public static bool SupportsFraming => Version.TryParse(Marshal.PtrToStringUTF8(NativeMethods.GetCoreVersion()), out var version) && version >= new Version(0, 32, 0);
+
+    private static ParallaxVideoSettings CompatibleVideo(ParallaxVideoSettings settings)
+    {
+        if (SupportsFraming) return settings;
+        if (settings.Framing is not (null or "fill"))
+            throw new NotSupportedException("Show whole image framing requires Seiza 0.32.0 or newer.");
+        return settings with { Framing = null };
+    }
+    private static ParallaxRequest CompatibleRequest(ParallaxRequest request)
+    {
+        if (request.Scene.Crop is not null && !SupportsFraming)
+            throw new NotSupportedException("Video cropping requires Seiza 0.32.0 or newer.");
+        return request with { Video = CompatibleVideo(request.Video) };
+    }
     public static Task<ParallaxTourPlan> PlanAsync(ParallaxRequest request, IProgress<ParallaxEvent>? events = null, CancellationToken cancellationToken = default) =>
         Task.Run(() => Plan(request, events, cancellationToken), cancellationToken);
 
     public static Task<ParallaxTourPlan> PlanOnSceneAsync(ParallaxVideo scene, string size, ParallaxTourOptions options, CancellationToken cancellationToken = default) =>
-        Task.Run(() => PlanOnScene(scene, size, options, cancellationToken), cancellationToken);
+        PlanOnSceneAsync(scene, size, options, "fill", cancellationToken);
+    public static Task<ParallaxTourPlan> PlanOnSceneAsync(ParallaxVideo scene, string size, ParallaxTourOptions options, string framing, CancellationToken cancellationToken = default) =>
+        Task.Run(() => PlanOnScene(scene, size, options, framing, cancellationToken), cancellationToken);
 
     public static Task<ParallaxVideo> PrepareAsync(ParallaxRequest request, IProgress<ParallaxEvent>? events = null, CancellationToken cancellationToken = default) =>
         Task.Run(() => Prepare(request, events, cancellationToken), cancellationToken);
@@ -30,7 +47,7 @@ internal static class ParallaxCore
         using var scope = new EventScope(events, cancellationToken);
         // The current planning ABI has no cancel parameter. Retain all owners
         // until it returns; a cancelled caller must not detach native work.
-        nint result = NativeMethods.PlanParallaxTourJson(request.ToJson(), &ReceiveEvent, scope.Context, out nint error);
+        nint result = NativeMethods.PlanParallaxTourJson(CompatibleRequest(request).ToJson(), &ReceiveEvent, scope.Context, out nint error);
         string? json = result == 0 ? null : NativeString.TakeOwned(result, string.Empty);
         Exception? failure = error == 0 ? null : NativeString.TakeError(error, "Could not plan a parallax tour.");
         scope.Check();
@@ -42,11 +59,14 @@ internal static class ParallaxCore
     // `size` frame ("WIDTHxHEIGHT"): each stop is framed at the depth the scene
     // shows its target at, and no image is solved. The scene keeps the distance
     // it was prepared with, so the plan's focus matters only to a new preparation.
-    public static ParallaxTourPlan PlanOnScene(ParallaxVideo scene, string size, ParallaxTourOptions options, CancellationToken cancellationToken = default)
+    public static ParallaxTourPlan PlanOnScene(ParallaxVideo scene, string size, ParallaxTourOptions options, CancellationToken cancellationToken = default) =>
+        PlanOnScene(scene, size, options, "fill", cancellationToken);
+    public static ParallaxTourPlan PlanOnScene(ParallaxVideo scene, string size, ParallaxTourOptions options, string framing, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scene); ArgumentNullException.ThrowIfNull(options);
         cancellationToken.ThrowIfCancellationRequested();
-        nint result = NativeMethods.PlanParallaxSceneTourJson(scene.Handle, ParallaxJson.SerializeSceneTourSettings(size, options), out nint error);
+        string? compatibleFraming = CompatibleVideo(new() { Framing = framing }).Framing;
+        nint result = NativeMethods.PlanParallaxSceneTourJson(scene.Handle, ParallaxJson.SerializeSceneTourSettings(size, options, compatibleFraming), out nint error);
         string? json = result == 0 ? null : NativeString.TakeOwned(result, string.Empty);
         Exception? failure = error == 0 ? null : NativeString.TakeError(error, "Could not plan a tour on the prepared scene.");
         if (json is null) throw failure ?? new SeizaCoreException("Could not plan a tour on the prepared scene.");
@@ -64,7 +84,7 @@ internal static class ParallaxCore
             [.. ParallaxInputPaths.FromInputs(request.Inputs), .. ParallaxInputPaths.FromScene(request.Scene),
                 .. ParallaxInputPaths.FromVideo(request.Video)]);
         using var scope = new EventScope(events, cancellationToken);
-        nint result = NativeMethods.PrepareParallaxJson(request.ToJson(), scope.Signal, &ReceiveEvent, scope.Context, out nint error);
+        nint result = NativeMethods.PrepareParallaxJson(CompatibleRequest(request).ToJson(), scope.Signal, &ReceiveEvent, scope.Context, out nint error);
         return FinishVideo(result, error, scope, protectedPaths);
     }
 
@@ -76,7 +96,7 @@ internal static class ParallaxCore
         string[] protectedPaths = ParallaxInputPaths.Capture(
             [.. video.ProtectedPaths, .. ParallaxInputPaths.FromVideo(settings)]);
         using var scope = new EventScope(events, cancellationToken);
-        nint result = NativeMethods.ReconfigureParallaxJson(video.Handle, settings.ToJson(), scope.Signal, &ReceiveEvent, scope.Context, out nint error);
+        nint result = NativeMethods.ReconfigureParallaxJson(video.Handle, CompatibleVideo(settings).ToJson(), scope.Signal, &ReceiveEvent, scope.Context, out nint error);
         return FinishVideo(result, error, scope, protectedPaths);
     }
 

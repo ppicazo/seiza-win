@@ -23,9 +23,14 @@ orientation without passing through the viewer's eight-bit display bitmap.
    choose aligned starless/stars layers. Manual layers must have the source
    dimensions, matching orientation and stretch; confirm their alignment
    before preparation. Neither RC-Astro's CLI nor StarXTerminator is bundled
-   or installed by Seiza. If the source has no existing plate solution,
-   manual-layer preparation and tour generation solve the selected stars layer,
-   including when the viewer contains the starless image.
+   or installed by Seiza. The viewer's plate solution is reused, including a
+   solution obtained after opening the video window. Otherwise FITS/XISF sources
+   are solved from their original headers first, falling back to the selected
+   stars layer; raster images use the pixel-aligned private snapshot/stars layer.
+   The inspector reports whether stars confirmed the headers or a blind solve
+   found the field. **Header coordinates (no confirming stars)** is an explicit
+   warning, not a verified star match. Solving is cancellable with a two-minute
+   limit on cores supporting the bounded solve API.
 2. In **Camera**, choose **Fly In** or **Tour**. Pick destinations on the image
    or enter source-pixel coordinates. Prepare a bounded preview, scrub or play
    it, then adjust the camera. Camera-only edits reuse the prepared scene;
@@ -35,6 +40,25 @@ orientation without passing through the viewer's eight-bit display bitmap.
 4. In **Output**, choose the output format, dimensions, frame rate, codec and render
    quality, then **Export Video**. Export fits the full-resolution camera and
    renders its frames independently of the smaller interactive preview.
+
+## Framing and source crop
+
+Seiza 0.32 or newer adds **Framing** in Output: **Fill frame** fills the video,
+cropping image edges as needed; **Fit whole image** preserves the entire filmed
+image and adds black bars when its shape differs from the frame. **Match image
+shape** instead computes even output dimensions from the source (or crop), with
+a 720p, 1080p, 1440p or 4K long side. The preview uses a smaller explicit size;
+it does not allocate a full-resolution image-shaped video.
+
+In Source, **Draw crop** selects a source-pixel rectangle; optionally lock its
+aspect to the output frame. Numeric values are applied together with **Apply
+crop values**. A crop must be at least 16 pixels each way and inside the source.
+**Use entire source** removes it. Cropping is undoable and rebuilds the scene;
+framing edits only refit the camera. Neither operation modifies input images.
+Camera points, labels and markers stay at their physical source-pixel positions;
+native requests translate them to the crop exactly once. New stops and default
+centres use the filmed rectangle. Saved Windows itineraries include the crop
+and store crop-relative points; older itineraries use the current crop.
 
 ## Feature parity
 
@@ -96,6 +120,12 @@ The *Stars and dust* section says where the dust came from and how many stars
 the map brought in front. The map path lives with the open window, like the
 other input files; tour itineraries do not record it. Dust maps need dust
 dimming on.
+
+Dust maps and plane masks span the original source, not the crop. With the
+upstream cropped-dust correction, reading, painting, reloading and exporting
+dust all use source coordinates; exported pixels outside the filmed crop are
+clear because no dust was estimated there. This correction must be available
+in the released native dependency before cropped dust editing ships.
 
 ## Depth planes
 
