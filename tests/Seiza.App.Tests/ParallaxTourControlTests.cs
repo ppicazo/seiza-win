@@ -1,10 +1,25 @@
 using Seiza.App.Models;
+using System.Text.Json;
 using Xunit;
 
 namespace Seiza.App.Tests;
 
 public sealed class ParallaxTourControlTests
 {
+    [Fact]
+    public void TransitionZoomIsReadAndReportedWithoutChangingStopValues()
+    {
+        var summary = JsonSerializer.Deserialize("""
+            {"fit":{"inside":true,"zoom":{"asked":1,"used":1},
+            "pan":{"asked":0,"used":0},"lead":{"asked":0,"used":0},
+            "truck":{"asked":0,"used":0},"motionZoom":{"asked":1,"used":1.75},
+            "stops":[{"zoom":{"asked":1,"used":1},"pan":{"asked":0,"used":0}}]}}
+            """, ParallaxJsonContext.Default.ParallaxSummary)!;
+        Assert.Equal(1.75, summary.Fit.MotionZoom!.Used);
+        Assert.Equal(["Transition zoom: 1.00 → 1.75"], summary.Fit.Adjustments);
+        Assert.False(summary.Fit.Stops[0].Zoom.Changed);
+        Assert.Null(JsonSerializer.Deserialize("{\"fit\":{\"inside\":true}}", ParallaxJsonContext.Default.ParallaxSummary)!.Fit.MotionZoom);
+    }
     [Fact]
     public void PullBackOnlyChangesDollyLensPanAndPush()
     {

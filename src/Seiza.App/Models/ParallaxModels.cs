@@ -556,6 +556,9 @@ public sealed record ParallaxFit
     public ParallaxFitValue Pan { get; init; } = new();
     public ParallaxFitValue Lead { get; init; } = new();
     public ParallaxFitValue Truck { get; init; } = new();
+    // Temporary lens magnification between fixed endpoints, not a stop edit.
+    // Missing on older cores.
+    public ParallaxFitValue? MotionZoom { get; init; }
     public ParallaxStopFit[] Stops { get; init; } = [];
     public bool Inside { get; init; }
     [JsonIgnore] public string? EdgeWarning => Inside ? null : "Some frames extend beyond the image. Move the focus or tour stops inward, or reduce roll and pan.";
@@ -569,6 +572,7 @@ public sealed record ParallaxFit
                 if (value.Changed) result.Add(string.Create(CultureInfo.InvariantCulture, $"{name}: {value.Asked:F2} → {value.Used:F2}"));
             }
             Add("Zoom", Zoom); Add("Pan", Pan); Add("Sideways lead", Lead); Add("Sideways motion", Truck);
+            if (MotionZoom is { } motionZoom) Add("Transition zoom", motionZoom);
             for (int i = 0; i < Stops.Length; i++)
             {
                 Add($"Stop {i + 1} zoom", Stops[i].Zoom); Add($"Stop {i + 1} pan", Stops[i].Pan);

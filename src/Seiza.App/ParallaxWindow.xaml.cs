@@ -376,7 +376,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
     private void DollyControl(StackPanel panel, Func<double> get, Action<double> set)
     {
         Slider(panel, "Dolly", get, set, 0, 0.99, value => $"{value:P0}",
-            "Moves toward the background through depth. Reducing Dolly pulls back and changes how near stars move against the nebula; a high Dolly stays close even at Zoom 1×.");
+            "Moves toward the background through depth. Reducing Dolly pulls back and changes how near stars move against the nebula; a high Dolly stays close even at Zoom 1×.", retainRange: true);
         var reset = Button(panel, "Reset Dolly to 0%", () => set(0));
         AutomationProperties.SetName(reset, "Reset Dolly to 0%");
     }

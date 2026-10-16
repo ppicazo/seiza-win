@@ -104,10 +104,11 @@ The native correction in #283 also keeps fitting local to stops instead of
 magnifying the whole tour. Windows regression coverage verifies unchanged
 opening pixels and global zoom after pulling back an off-centre target, with
 glide 0 and 0.2. Show Whole Image remains a separate, explicit framing choice,
-not the fix for the Fill Frame coupling. Release remains gated on published
-packages containing **both #283 and #277**; the isolated #283 validation build
-does not include #277's cropped-dust correction. Production pins remain unchanged
-until those fixes are released together and the combined build is validated.
+not the fix for the Fill Frame coupling. Windows uses published Seiza/C ABI
+**0.33.0**, containing both #283 and #277's source-space cropped-dust correction.
+For two-stop turns, fitting can add temporary magnification between the stops
+while preserving their endpoint lenses. The preview inspector reports this as
+**Transition zoom**. Endpoint spins are fitted throughout their holds.
 
 ### Shared composition controls
 

@@ -7,6 +7,77 @@ namespace Seiza.App.Tests;
 
 public sealed class ParallaxFramingTests
 {
+    [Fact]
+    public void ShippedCoreSupportsFramingAndWholeImagePullBack()
+    {
+        Assert.True(ParallaxCore.SupportsFraming);
+        Assert.True(ParallaxCore.SupportsPullBackToWholeImage);
+    }
+
+    [Fact]
+    public void PullBackCenteringUsesCombinedOverallAndStopMagnification()
+    {
+        using var fixture = new ParallaxCoreTests.Fixture();
+        fixture.Request.Video.Framing = "fit";
+        fixture.Request.Video.Zoom = 2;
+        fixture.Request.Video.Tour = [new() { Travel = 0, Hold = 0.1 },
+            new() { Focus = [80, 48], Travel = 0.3, Hold = 0.1, PullBackToWholeImage = true }];
+        using var overall = ParallaxCore.Prepare(fixture.Request);
+        var settings = fixture.Request.Video with { Zoom = 1,
+            Tour = fixture.Request.Video.Tour.Select(s => s.DeepClone() with { Zoom = 2 }).ToList() };
+        using var perStop = ParallaxCore.Reconfigure(overall, settings);
+        foreach (int frame in new[] { 0, overall.FrameCount / 2, overall.FrameCount - 1 })
+            Assert.Equal(overall.RenderBgraFrame(frame), perStop.RenderBgraFrame(frame));
+    }
+
+    [Theory]
+    [InlineData(180, 0)]
+    [InlineData(360, 0.2)]
+    public void TwoStopTurnsReportTransitionZoomWithoutChangingEndpointLenses(double turn, double glide)
+    {
+        if (!ParallaxCore.SupportsPullBackToWholeImage) return;
+        using var fixture = new ParallaxCoreTests.Fixture();
+        fixture.Request.Video.Framing = "fill";
+        fixture.Request.Video.TourGlide = glide;
+        fixture.Request.Video.Tour = [new() { Travel = 0, Hold = 0.2 },
+            new() { Travel = 0.5, Hold = 0.2, RotateDegrees = turn }];
+        using var video = ParallaxCore.Prepare(fixture.Request);
+        Assert.True(video.Summary.Fit.Inside);
+        Assert.Equal(1, video.Summary.Fit.Zoom.Used);
+        Assert.All(video.Summary.Fit.Stops, stop => Assert.Equal(1, stop.Zoom.Used));
+        Assert.True(video.Summary.Fit.MotionZoom!.Used > 1);
+        Assert.Contains(video.Summary.Fit.Adjustments, text => text.StartsWith("Transition zoom:", StringComparison.Ordinal));
+        using var refit = ParallaxCore.Reconfigure(video, fixture.Request.Video);
+        Assert.Equal(video.RenderBgraFrame(0), refit.RenderBgraFrame(0));
+        Assert.Equal(video.RenderBgraFrame(video.FrameCount - 1), refit.RenderBgraFrame(refit.FrameCount - 1));
+    }
+
+    [Fact]
+    public void PublishedCoreUsesFullSourceDustCoordinatesForNonOriginCrop()
+    {
+        if (!ParallaxCore.SupportsPullBackToWholeImage) return;
+        using var fixture = new ParallaxCoreTests.Fixture();
+        fixture.Request.Scene.Crop = [16, 16, 32, 32];
+        fixture.Request.Video.Tour = [];
+        fixture.Request.Inputs.DustMap = fixture.Request.Inputs.Starless;
+        using var video = ParallaxCore.Prepare(fixture.Request);
+        using var replaced = ParallaxCore.WithDustMap(video, fixture.Request.Inputs.DustMap);
+        float[] opacity = replaced.DustMap(96, 64)!;
+        Assert.Equal(96 * 64, opacity.Length);
+        Assert.Equal(0, opacity[0]);
+        Assert.True(opacity[24 * 96 + 24] > 0);
+        Assert.Equal(0, opacity[63 * 96 + 95]);
+        // The core resamples maps; painting/readback need not preserve a
+        // gradient bit-for-bit. Check an asymmetric mask away from its seam.
+        float[] mask = Enumerable.Range(0, 96 * 64).Select(i => i % 96 >= 32 ? 0.75f : 0f).ToArray();
+        using var painted = ParallaxCore.WithDustMap(replaced, mask, 96, 64);
+        float[] restored = painted.DustMap(96, 64)!;
+        Assert.Equal(0, restored[24 * 96 + 24]);
+        Assert.InRange(restored[24 * 96 + 40], 0.7499f, 0.7501f);
+        Assert.Equal(0, restored[0]);
+        Assert.Equal(0, restored[63 * 96 + 95]);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(0.2)]

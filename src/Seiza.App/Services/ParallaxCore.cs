@@ -10,24 +10,9 @@ namespace Seiza.App.Services;
 internal static class ParallaxCore
 {
     public static bool SupportsFraming => Version.TryParse(Marshal.PtrToStringUTF8(NativeMethods.GetCoreVersion()), out var version) && version >= new Version(0, 32, 0);
-    private static readonly Lazy<bool> PullBackSupport = new(ProbePullBackSupport);
-    public static bool SupportsPullBackToWholeImage => PullBackSupport.Value;
-
-    private static unsafe bool ProbePullBackSupport()
-    {
-        if (!SupportsFraming) return false;
-        // #283 adds a JSON field without changing the development core version.
-        // An intentionally wrong field type fails during deserialization, before
-        // file/catalog work. Only the recognized boolean-type error proves support;
-        // unknown-field errors (published 0.32) and all other failures fail closed.
-        const string marker = "seiza-pullback-capability-probe";
-        nint result = NativeMethods.PlanParallaxTourJson(
-            "{\"tour\":[{\"pullBackToWholeImage\":\"" + marker + "\"}]}", null, 0, out nint error);
-        if (result != 0) _ = NativeString.TakeOwned(result, string.Empty);
-        string? message = error == 0 ? null : NativeString.TakeError(error, "Unsupported camera setting.").Message;
-        return message is not null && message.Contains(marker, StringComparison.Ordinal) &&
-            message.Contains("expected a boolean", StringComparison.Ordinal);
-    }
+    // Whole-image pull-back first shipped in 0.33. Development #283 builds
+    // shared 0.32's version, but production no longer needs an error-text probe.
+    public static bool SupportsPullBackToWholeImage => Version.TryParse(Marshal.PtrToStringUTF8(NativeMethods.GetCoreVersion()), out var version) && version >= new Version(0, 33, 0);
 
     private static ParallaxVideoSettings CompatibleVideo(ParallaxVideoSettings settings)
     {
