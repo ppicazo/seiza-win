@@ -8,8 +8,8 @@ a finished image into a camera tour with depth, motion, and titles. Seiza pairs
 a WinUI 3 interface and GPU-backed viewport with the shared
 [Seiza](https://github.com/theatrus/seiza) Rust imaging core.
 
-[Download Seiza for Windows 0.8.3 (x64)](https://github.com/theatrus/seiza-win/releases/download/v0.8.3/seiza-0.8.3-windows-x86_64.msi)
-· [0.8.3 release notes](docs/releases/v0.8.3.md)
+[Download Seiza for Windows 0.8.4 (x64)](https://github.com/theatrus/seiza-win/releases/download/v0.8.4/seiza-0.8.4-windows-x86_64.msi)
+· [0.8.4 release notes](docs/releases/v0.8.4.md)
 · [Previous versions](https://github.com/theatrus/seiza-win/releases)
 
 **Also from Seiza:** [Core, CLI, and libraries](https://github.com/theatrus/seiza) ·
@@ -64,6 +64,9 @@ the starless image.
 - Generate a multi-stop tour on the prepared scene or pick destinations directly
   on the image. Edit travel, holds, zoom, pan, roll and target depth; save and load
   portable tour itinerary JSON with artwork references.
+- Choose **Fill frame** or **Show whole image**, match the frame to your image's
+  shape, or draw a source crop. **Pull Back** widens a stop while retaining its
+  target, depth and timing; requested/fitted values explain camera adjustments.
 - Preview, play and scrub your camera move. Tune star and background depth,
   use offline distance catalogs, and add object labels, a credit logo and
   opening, closing or per-stop title-card images.
@@ -86,8 +89,8 @@ or add a custom image-mask plane with an explicit name and distance.
 
 See the [Windows parallax guide](docs/PARALLAX-VIDEO.md) for layer requirements,
 camera and tour controls, encoder availability and export limits. Windows
-0.8.3 uses published Seiza 0.30.1, stacking 0.32.0, parallax 0.7.0 and
-image-io 0.5.0 crates, without vendored patches.
+0.8.4 uses published Seiza/C ABI 0.33.0, stacking 0.36.0, parallax 0.10.0 and
+image-io 0.8.0 crates, without vendored patches.
 
 ## Image viewing and folder review
 
@@ -115,6 +118,24 @@ RGB histograms, searchable source headers, and processing provenance.
 | ![Native sidebar with nested relative paths, collapsible groups and synthetic sample thumbnails](docs/images/nested-browser/folder-path.png) | ![Native sidebar grouping synthetic sample images by filename filter, with relative labels distinguishing same-named files](docs/images/nested-browser/filter.png) |
 
 Native sidebar controls shown with synthetic sample images.
+
+## Seiza for Windows 0.8.4: framing, cropped dust and reliable pull-back
+
+- Frame the whole image, fill the video, match its aspect ratio, or draw a
+  non-destructive source crop. Dust editing and saved tours keep their alignment.
+- Pull back an off-centre target without magnifying the opening. Dolly and Zoom
+  have independent sliders and resets; stop selection seeks its arrival.
+  **Transition zoom** explains temporary fitting between two-stop turns.
+- Use original FITS/XISF astrometric headers, reuse viewer solutions, and solve
+  aligned Stars directly for known starless sources. Unconfirmed headers are
+  explicitly marked unverified, and solving supports cancellation/time limits.
+- Check for updates through the signed feed at **seiza.fyi**.
+
+![Source crop controls and the filmed rectangle in the native Windows parallax editor](docs/images/parallax-framing/source-crop.png)
+
+![Native per-stop Dolly and Zoom controls with Pull Back](docs/images/parallax-framing/stop-camera.png)
+
+See the [0.8.4 release notes](docs/releases/v0.8.4.md) for details.
 
 ## Seiza for Windows 0.8.3: nested folders and grouped browsing
 
@@ -429,8 +450,8 @@ remaining macOS and Windows integration work.
 
 ## Install
 
-Download the [Seiza for Windows 0.8.3 x64 MSI](https://github.com/theatrus/seiza-win/releases/download/v0.8.3/seiza-0.8.3-windows-x86_64.msi).
-Its [SHA-256 checksums](https://github.com/theatrus/seiza-win/releases/download/v0.8.3/SHA256SUMS.txt)
+Download the [Seiza for Windows 0.8.4 x64 MSI](https://github.com/theatrus/seiza-win/releases/download/v0.8.4/seiza-0.8.4-windows-x86_64.msi).
+Its [SHA-256 checksums](https://github.com/theatrus/seiza-win/releases/download/v0.8.4/SHA256SUMS.txt)
 are published beside it. The installer places Seiza in
 `Program Files\Seiza for Windows` for every user, adds a shared Start Menu
 shortcut, and registers `.fit`, `.fits`, `.fts`, and `.xisf` with Windows
@@ -495,7 +516,7 @@ Build the self-contained all-users WiX MSI:
 ```powershell
 dotnet build packaging\windows\Seiza.App.wixproj `
   -c Release `
-  -p:SeizaVersion=0.8.3
+  -p:SeizaVersion=0.8.4
 ```
 
 The installer is written to `dist`. See the

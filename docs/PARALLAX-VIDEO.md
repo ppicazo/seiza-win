@@ -69,6 +69,8 @@ native requests translate them to the crop exactly once. New stops and default
 centres use the filmed rectangle. Saved Windows itineraries include the crop
 and store crop-relative points; older itineraries use the current crop.
 
+![Framing and image-shape controls in the native Windows editor](images/parallax-framing/output-framing.png)
+
 ## Feature parity
 
 ### Tour-point framing
