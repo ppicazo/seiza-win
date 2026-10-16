@@ -92,6 +92,7 @@
     <Compile Include="..\..\src\Seiza.App\Services\SeizaCore.cs" Link="Services\SeizaCore.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\StackFolderMonitor.cs" Link="Services\StackFolderMonitor.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\UpdateInstallerNaming.cs" Link="Services\UpdateInstallerNaming.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\UpdateFeeds.cs" Link="Services\UpdateFeeds.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\SeizaCoreException.cs" Link="Services\SeizaCoreException.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\StarAnalysisService.cs" Link="Services\StarAnalysisService.cs" />
     <Compile Include="..\..\src\Seiza.App\Interop\NativeMethods.cs" Link="Interop\NativeMethods.cs" />
