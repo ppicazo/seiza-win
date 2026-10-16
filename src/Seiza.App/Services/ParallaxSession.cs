@@ -70,6 +70,8 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public double[] ImageCenter => [FilmedRectangle[0] + (FilmedRectangle[2] - 1) / 2.0,
         FilmedRectangle[1] + (FilmedRectangle[3] - 1) / 2.0];
     public string? ValidationMessage => Composition.ValidationMessage ??
+        (Composition.Stops.Any(stop => stop.PullBackToWholeImage) && !ParallaxCore.SupportsPullBackToWholeImage
+            ? "Whole-image pull-back requires a native core containing Seiza #283." : null) ??
         ((Composition.Scene.Crop is not null || Composition.Framing == "fit") && !ParallaxCore.SupportsFraming
             ? "Cropping and whole-image framing require Seiza 0.32.0 or newer." : null);
     public bool LayersAligned { get => _layersAligned; set { if (_layersAligned == value) return; _layersAligned = value; Invalidate(true); } }
@@ -165,6 +167,11 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         if (previous.Scene.GaiaMaxMagnitude != updated.Scene.GaiaMaxMagnitude) _ = RefreshCatalogStatusAsync();
     }
     public void EditStop(Action<ParallaxStop> edit) { if (SelectedIndex is int i) Edit(c => edit(c.Stops[i])); }
+    public void EditStopCamera(Action<ParallaxStop> edit) => EditStop(stop =>
+    {
+        if (ParallaxCore.SupportsPullBackToWholeImage) stop.EditCamera(edit);
+        else edit(stop);
+    });
     public void SetCrop(int[]? crop)
     {
         if (_closed || IsBusy || !SourceReady) return;
@@ -447,7 +454,8 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public void AddStop(bool whole = false)
     {
         if (IsBusy || _closed) return;
-        var stop = new ParallaxStop { Name = whole ? "Whole Image" : "Custom Point", Focus = whole ? null : ImageCenter, Dolly = 0, Zoom = 1 };
+        var stop = new ParallaxStop { Name = whole ? "Whole Image" : "Custom Point", Focus = whole ? null : ImageCenter,
+            Dolly = 0, Zoom = 1, PullBackToWholeImage = !whole && ParallaxCore.SupportsPullBackToWholeImage };
         stop.RotateDegrees = SelectedIndex is int i ? Composition.Stops[i].RotateDegrees : 0;
         int index = SelectedIndex is int j ? j + 1 : Composition.Stops.Count;
         Edit(c => c.Stops.Insert(index, stop)); SelectStop(stop.Id);
@@ -472,6 +480,8 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     public void PullBackStop()
     {
         if (IsBusy || _closed || SelectedStop is not Guid id) return;
+        if (!ParallaxCore.SupportsPullBackToWholeImage)
+        { Error = "Whole-image pull-back requires a native core containing Seiza #283."; Notify(); return; }
         EditStop(s => s.PullBack());
         SelectStop(id);
     }

@@ -45,6 +45,8 @@ public sealed record ParallaxStop
     [JsonIgnore] public Guid Id { get; set; } = Guid.NewGuid();
     public string? Name { get; set; }
     public double[]? Focus { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool PullBackToWholeImage { get; set; }
     public double Dolly { get; set; }
     public double Zoom { get; set; } = 1;
     public double RotateDegrees { get; set; }
@@ -63,7 +65,8 @@ public sealed record ParallaxStop
     public double? DepthParsecs { get; set; }
     [JsonIgnore] public string DisplayName => Name ?? (Focus is null ? "Whole Image" : "Custom Point");
     public ParallaxStop DeepClone() => this with { Focus = Focus?.ToArray() };
-    public void PullBack() { Dolly = 0; Zoom = 1; Pan = 0; Push = 0; }
+    public void PullBack() { Dolly = 0; Zoom = 1; Pan = 0; Push = 0; PullBackToWholeImage = true; }
+    public void EditCamera(Action<ParallaxStop> edit) { edit(this); PullBackToWholeImage = true; }
 }
 
 public sealed record ParallaxTourOptions
@@ -376,7 +379,7 @@ public sealed record ParallaxComposition
         {
             if (Motion != ParallaxMotion.Tour || !TourLoop || Stops.Count < 2) return 0;
             ParallaxStop first = Stops[0], last = Stops[^1];
-            if (PointsEqual(first.Focus, last.Focus) && first.Dolly == last.Dolly && first.Zoom == last.Zoom && first.Pan == last.Pan) return 0;
+            if (PointsEqual(first.Focus, last.Focus) && first.PullBackToWholeImage == last.PullBackToWholeImage && first.Dolly == last.Dolly && first.Zoom == last.Zoom && first.Pan == last.Pan) return 0;
             return Stops.Skip(1).Average(stop => stop.Travel) + Math.Max(first.Hold * 3, 3);
         }
     }

@@ -7,6 +7,31 @@ namespace Seiza.App.Tests;
 
 public sealed class ParallaxFramingTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0.2)]
+    public void WholeImagePullBackPreservesOpeningTargetAndGlobalLensWhenSupported(double glide)
+    {
+        using var fixture = new ParallaxCoreTests.Fixture();
+        fixture.Request.Video.Framing = "fill"; fixture.Request.Video.TourGlide = glide;
+        fixture.Request.Video.Tour[1].RotateDegrees = 0; fixture.Request.Video.Tour[1].Pan = 0;
+        fixture.Request.Video.Tour[1].Dolly = 0.8; fixture.Request.Video.Tour[1].Zoom = 3;
+        var settings = fixture.Request.Video with { Tour = fixture.Request.Video.Tour.Select(s => s.DeepClone()).ToList() };
+        var target = settings.Tour[1].Focus!.ToArray(); settings.Tour[1].PullBack();
+        if (!ParallaxCore.SupportsPullBackToWholeImage)
+        {
+            var error = Assert.Throws<NotSupportedException>(() => ParallaxCore.Prepare(fixture.Request with { Video = settings }));
+            Assert.Contains("#283", error.Message);
+            return;
+        }
+        using var original = ParallaxCore.Prepare(fixture.Request);
+        using var pulled = ParallaxCore.Reconfigure(original, settings);
+        Assert.Equal(original.RenderBgraFrame(0), pulled.RenderBgraFrame(0));
+        Assert.Equal(original.Summary.Fit.Zoom.Used, pulled.Summary.Fit.Zoom.Used);
+        Assert.Equal(target, settings.Tour[1].Focus);
+        Assert.Equal(pulled.RenderBgraFrame(0), pulled.RenderBgraFrame(pulled.FrameCount - 1));
+        Assert.True(pulled.Summary.Fit.Inside);
+    }
     [Fact]
     public void WideCustomPointRefitsAreStableOnFramingCapableCores()
     {

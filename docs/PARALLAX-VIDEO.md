@@ -86,18 +86,28 @@ Overall/opening/end zoom still has a minimum of 1× and independent resets.
 **Pull Back** resets the selected stop's Dolly, Zoom, Pan and Push while
 retaining its destination, name, depth and timing. It is undoable, unlike
 **Use Whole Image**, which clears the destination.
+With the native correction from [Seiza #283](https://github.com/theatrus/seiza/pull/283),
+it also opts into `pullBackToWholeImage`: the camera widens toward the image
+centre while keeping the selected target. Tighter Dolly/Zoom views move back
+toward that target. New custom points and manual per-stop Dolly/Zoom edits use
+the same mode, which round-trips with saved itineraries. Existing authored
+tours default to their original point-centred behavior. Pull Back is disabled
+on native cores that do not recognize the setting; imported tours requiring it
+show an explicit unsupported-core message rather than silently changing framing.
 
 Fill Frame may increase fitted zoom to keep image edges outside the video.
 A stop below Zoom 1× offers **Show Whole Image for Entire Video** explicitly;
 this changes the whole video's framing and permits black space for wider views.
 The preview inspector lists requested versus fitted adjustments.
 
-Release gate: the shared tour fitter still has a global-zoom fallback in Fill
-Frame. Widening one stop can therefore magnify the opening too; resetting that
-stop is not a fix for the coupling. Adopt and validate the upstream local-fit
-correction before shipping these controls. The regression must keep an unchanged
-opening unchanged when a different stop widens. Show Whole Image is an explicit
-workaround, not a correction to the Fill Frame fitter.
+The native correction in #283 also keeps fitting local to stops instead of
+magnifying the whole tour. Windows regression coverage verifies unchanged
+opening pixels and global zoom after pulling back an off-centre target, with
+glide 0 and 0.2. Show Whole Image remains a separate, explicit framing choice,
+not the fix for the Fill Frame coupling. Release remains gated on published
+packages containing **both #283 and #277**; the isolated #283 validation build
+does not include #277's cropped-dust correction. Production pins remain unchanged
+until those fixes are released together and the combined build is validated.
 
 ### Shared composition controls
 

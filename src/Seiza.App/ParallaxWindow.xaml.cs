@@ -673,7 +673,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             Note(stop, "An image with transparency shown during this stop in place of its title, whether or not titles are shown. Make it the video's size for sharp lettering.");
             Button(stop, "Pick Destination", BeginPickDestination);
             Button(stop, "Use Whole Image", () => Session.EditStop(s =>
-            { s.Focus = null; s.Name = "Whole Image"; s.Dolly = 0; s.Zoom = 1; s.Pan = 0; s.DepthParsecs = null; }));
+            { s.Focus = null; s.Name = "Whole Image"; s.Dolly = 0; s.Zoom = 1; s.Pan = 0; s.DepthParsecs = null; s.PullBackToWholeImage = false; }));
             DestinationCoordinates(stop);
             OptionalDistance(stop, "Set target plane distance", "Target depth (pc)", () => SelectedStop()?.DepthParsecs,
                 value => Session.EditStop(s => s.DepthParsecs = value),
@@ -684,10 +684,12 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             Number(stop, "Hold (s)", () => SelectedStop()?.Hold ?? 0,
                 value => Session.EditStop(s => s.Hold = value), 0, 600, 0.1);
             Note(stop, "Set hold to 0 to pass straight through. Glide, spin and push can keep a held stop moving.");
-            DollyControl(stop, () => SelectedStop()?.Dolly ?? 0, value => Session.EditStop(s => s.Dolly = value));
-            ZoomControl(stop, "Zoom", () => SelectedStop()?.Zoom ?? 1, value => Session.EditStop(s => s.Zoom = value), 0.1);
-            Button(stop, "Pull Back", Session.PullBackStop);
-            Note(stop, "Pull Back resets Dolly, Zoom, Pan and Push while keeping this destination, its depth and timing.");
+            DollyControl(stop, () => SelectedStop()?.Dolly ?? 0, value => Session.EditStopCamera(s => s.Dolly = value));
+            ZoomControl(stop, "Zoom", () => SelectedStop()?.Zoom ?? 1, value => Session.EditStopCamera(s => s.Zoom = value), 0.1);
+            Button(stop, "Pull Back", Session.PullBackStop, () => ParallaxCore.SupportsPullBackToWholeImage);
+            Note(stop, ParallaxCore.SupportsPullBackToWholeImage ?
+                "Pull Back widens toward the whole image, keeping this target, its depth and timing. Tighter Dolly/Zoom views return toward the target." :
+                "Whole-image pull-back needs a native core containing Seiza #283; this core keeps authored point-centred framing.");
             var wide = new StackPanel { Spacing = 8 }; stop.Children.Add(wide);
             Note(wide, "Fill Frame may increase fitted zoom to hide image edges. Show Whole Image preserves a wider stop and permits black space; this changes framing for the entire video.");
             Button(wide, "Show Whole Image for Entire Video", () => Session.Edit(c => c.Framing = "fit"), () => ParallaxCore.SupportsFraming);
