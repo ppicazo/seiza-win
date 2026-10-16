@@ -10,14 +10,14 @@ namespace Seiza.App.Services;
 
 internal sealed class UpdateController : IDisposable
 {
-    internal const string AppCastUrl =
-        "https://github.com/theatrus/seiza-win/releases/latest/download/appcast.xml";
-
     // Shared with Seiza for Mac so both native apps have the same Sparkle trust root.
     internal const string PublicEd25519Key =
         "Jk4K7QO9ohQbi455S888/lnSiqXB6a5sB4wEuEZjaQ0=";
 
-    private readonly SparkleUpdater _updater;
+    // One updater per copy of the feed, in UpdateFeeds order. The updater
+    // whose feed answered the check also downloads and installs the update.
+    private readonly SparkleUpdater[] _updaters;
+    private SparkleUpdater _updater;
     private ContentDialog? _downloadDialog;
     private ProgressBar? _downloadProgress;
     private TextBlock? _downloadStatus;
@@ -30,8 +30,26 @@ internal sealed class UpdateController : IDisposable
 
     public UpdateController()
     {
-        _updater = new SparkleUpdater(
-            AppCastUrl,
+        _updaters = UpdateFeeds.AppCastUrls.Select(CreateUpdater).ToArray();
+        _updater = _updaters[0];
+        foreach (SparkleUpdater updater in _updaters)
+        {
+            updater.DownloadStarted += Updater_DownloadStarted;
+            updater.DownloadMadeProgress += Updater_DownloadMadeProgress;
+            updater.DownloadFinished += Updater_DownloadFinished;
+            updater.DownloadHadError += Updater_DownloadHadError;
+            updater.DownloadCanceled += Updater_DownloadCanceled;
+            updater.DownloadedFileIsCorrupt += Updater_DownloadedFileIsCorrupt;
+            updater.DownloadedFileThrewWhileCheckingSignature +=
+                Updater_DownloadedFileThrewWhileCheckingSignature;
+            updater.InstallUpdateFailed += Updater_InstallUpdateFailed;
+            updater.CloseApplication += Updater_CloseApplication;
+        }
+    }
+
+    private static SparkleUpdater CreateUpdater(string appCastUrl) =>
+        new(
+            appCastUrl,
             new Ed25519Checker(
                 SecurityMode.Strict,
                 PublicEd25519Key,
@@ -44,18 +62,6 @@ internal sealed class UpdateController : IDisposable
             // Keep the MSI filename from the signed appcast instead.
             CheckServerFileName = false,
         };
-
-        _updater.DownloadStarted += Updater_DownloadStarted;
-        _updater.DownloadMadeProgress += Updater_DownloadMadeProgress;
-        _updater.DownloadFinished += Updater_DownloadFinished;
-        _updater.DownloadHadError += Updater_DownloadHadError;
-        _updater.DownloadCanceled += Updater_DownloadCanceled;
-        _updater.DownloadedFileIsCorrupt += Updater_DownloadedFileIsCorrupt;
-        _updater.DownloadedFileThrewWhileCheckingSignature +=
-            Updater_DownloadedFileThrewWhileCheckingSignature;
-        _updater.InstallUpdateFailed += Updater_InstallUpdateFailed;
-        _updater.CloseApplication += Updater_CloseApplication;
-    }
 
     public static string CurrentVersion
     {
@@ -81,40 +87,44 @@ internal sealed class UpdateController : IDisposable
         _isBusy = true;
         try
         {
-            UpdateInfo updateInfo;
-            try
-            {
+            // Our feed first, then GitHub's. A feed that throws or cannot be
+            // verified (CouldNotDetermine) passes to the next one.
+            Exception? lastError = null;
+            var answer = await UpdateFeeds.FirstAnswerAsync(
+                _updaters,
                 // Seiza owns the prompt and skip preference. Asking NetSparkle to ignore
                 // its built-in skipped-version state keeps manual checks deterministic.
-                updateInfo = await _updater.CheckForUpdatesQuietly(ignoreSkippedVersions: true);
-            }
-            catch (Exception exception)
+                updater => updater.CheckForUpdatesQuietly(ignoreSkippedVersions: true),
+                info => info.Status != UpdateStatus.CouldNotDetermine,
+                exception => lastError = exception);
+
+            if (answer is null)
             {
                 if (userInitiated)
                 {
                     await ShowMessageAsync(
                         dialogOwner,
                         "Couldn’t check for updates",
-                        exception.Message);
+                        lastError?.Message
+                            ?? "The update feed could not be reached or verified. Try again later.");
                 }
                 return;
             }
 
+            (SparkleUpdater answeringUpdater, UpdateInfo updateInfo) = answer.Value;
             if (updateInfo.Status != UpdateStatus.UpdateAvailable || updateInfo.Updates.Count == 0)
             {
                 if (userInitiated)
                 {
-                    bool checkFailed = updateInfo.Status == UpdateStatus.CouldNotDetermine;
-                    string title = checkFailed
-                        ? "Couldn’t check for updates"
-                        : "Seiza is up to date";
-                    string message = checkFailed
-                        ? "The update feed could not be reached or verified. Try again later."
-                        : $"You’re running the latest version of Seiza for Windows ({CurrentVersion}).";
-                    await ShowMessageAsync(dialogOwner, title, message);
+                    await ShowMessageAsync(
+                        dialogOwner,
+                        "Seiza is up to date",
+                        $"You’re running the latest version of Seiza for Windows ({CurrentVersion}).");
                 }
                 return;
             }
+
+            _updater = answeringUpdater;
 
             AppCastItem update = updateInfo.Updates[0];
             if (!userInitiated && string.Equals(
@@ -456,16 +466,19 @@ internal sealed class UpdateController : IDisposable
         }
 
         _disposed = true;
-        _updater.DownloadStarted -= Updater_DownloadStarted;
-        _updater.DownloadMadeProgress -= Updater_DownloadMadeProgress;
-        _updater.DownloadFinished -= Updater_DownloadFinished;
-        _updater.DownloadHadError -= Updater_DownloadHadError;
-        _updater.DownloadCanceled -= Updater_DownloadCanceled;
-        _updater.DownloadedFileIsCorrupt -= Updater_DownloadedFileIsCorrupt;
-        _updater.DownloadedFileThrewWhileCheckingSignature -=
-            Updater_DownloadedFileThrewWhileCheckingSignature;
-        _updater.InstallUpdateFailed -= Updater_InstallUpdateFailed;
-        _updater.CloseApplication -= Updater_CloseApplication;
-        _updater.Dispose();
+        foreach (SparkleUpdater updater in _updaters)
+        {
+            updater.DownloadStarted -= Updater_DownloadStarted;
+            updater.DownloadMadeProgress -= Updater_DownloadMadeProgress;
+            updater.DownloadFinished -= Updater_DownloadFinished;
+            updater.DownloadHadError -= Updater_DownloadHadError;
+            updater.DownloadCanceled -= Updater_DownloadCanceled;
+            updater.DownloadedFileIsCorrupt -= Updater_DownloadedFileIsCorrupt;
+            updater.DownloadedFileThrewWhileCheckingSignature -=
+                Updater_DownloadedFileThrewWhileCheckingSignature;
+            updater.InstallUpdateFailed -= Updater_InstallUpdateFailed;
+            updater.CloseApplication -= Updater_CloseApplication;
+            updater.Dispose();
+        }
     }
 }

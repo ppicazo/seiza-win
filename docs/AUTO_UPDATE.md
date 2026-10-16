@@ -19,13 +19,30 @@ all-users WiX MSI.
   opening it. The app then exits and WiX `MajorUpgrade` performs the in-place
   update. The normal Windows Installer and UAC interface remains visible.
 
-The feed is:
+The same signed feed is published in two places, and the app tries them in
+this order (`UpdateFeeds.AppCastUrls`):
 
-`https://github.com/theatrus/seiza-win/releases/latest/download/appcast.xml`
+1. `https://updates.seiza.fyi/windows/appcast.xml` (ours)
+2. `https://github.com/theatrus/seiza-win/releases/latest/download/appcast.xml`
+
+The release job uploads the feed pair to the GitHub release. A release webhook
+then has ec2admin copy `appcast.xml` and `appcast.xml.signature`, byte for
+byte, to updates.seiza.fyi, after checking both against the release's
+`SHA256SUMS.txt`. The Mac app has its own feed under `/mac/`, because the two
+apps version and release separately.
+
+Each check asks our feed first. If it cannot be reached, or does not verify,
+the same check asks GitHub. The updater whose feed answered also downloads and
+installs the update. The MSI always comes from the GitHub release, because its
+URL is inside the signed feed.
+
+Builds released before this change read only the GitHub feed, so release CI
+must keep publishing it there.
 
 The app runs NetSparkle in strict mode. Both the MSI enclosure signature in
 `appcast.xml` and the detached `appcast.xml.signature` must verify against the
-public key compiled into the app.
+public key compiled into the app, so a copy that differs from what CI signed is
+rejected.
 
 ## Release setup
 
