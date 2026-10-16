@@ -7,6 +7,30 @@ namespace Seiza.App.Tests;
 
 public sealed class ParallaxFramingTests
 {
+    [Fact]
+    public void WideCustomPointRefitsAreStableOnFramingCapableCores()
+    {
+        using var fixture = new ParallaxCoreTests.Fixture();
+        fixture.Request.Video.RotateDegrees = [0, 0]; fixture.Request.Video.Framing = "fit";
+        fixture.Request.Video.Tour[1].RotateDegrees = 0; fixture.Request.Video.Tour[1].Pan = 0;
+        fixture.Request.Video.Tour[1].Dolly = 0.8; fixture.Request.Video.Tour[1].Zoom = 3;
+        if (!ParallaxCore.SupportsFraming)
+        {
+            Assert.Throws<NotSupportedException>(() => ParallaxCore.Prepare(fixture.Request));
+            return;
+        }
+        using var scene = ParallaxCore.Prepare(fixture.Request);
+        var settings = fixture.Request.Video with { Tour = fixture.Request.Video.Tour.Select(s => s.DeepClone()).ToList() };
+        settings.Tour[1].Dolly = 0; settings.Tour[1].Zoom = 0.5;
+        using var wide = ParallaxCore.Reconfigure(scene, settings);
+        byte[] expected = wide.RenderBgraFrame(wide.FrameCount - 1);
+        Assert.False(expected.SequenceEqual(scene.RenderBgraFrame(scene.FrameCount - 1)));
+        for (int i = 0; i < 3; i++)
+        {
+            using var refit = ParallaxCore.Reconfigure(wide, settings);
+            Assert.Equal(expected, refit.RenderBgraFrame(refit.FrameCount - 1));
+        }
+    }
     [Theory]
     [InlineData(9213, 6943, 3840, 3840, 2894)]
     [InlineData(4123, 4123, 1920, 1920, 1920)]

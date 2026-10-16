@@ -7,6 +7,50 @@ namespace Seiza.App.Tests;
 
 public sealed class ParallaxHeaderSolveTests
 {
+    [Theory]
+    [InlineData("original.xisf")]
+    [InlineData("original.tif")]
+    public async Task KnownStarlessSourceOnlySolvesAlignedStars(string original)
+    {
+        var paths = new List<string>(); var request = Request();
+        await ParallaxRequestSource.EnsureSolutionAsync(request, original, path =>
+        { paths.Add(path); return Task.FromResult(Result("blind")); }, CancellationToken.None,
+            sourceIsStarless: true, layersAligned: true, snapshotPath: "starless-snapshot.png");
+        Assert.Equal(["private-stars.tif"], paths);
+    }
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task MissingOrUnalignedStarsBlockKnownStarlessBeforeAnySolve(bool hasStars, bool aligned)
+    {
+        var request = Request(); if (!hasStars) request.Inputs.Stars = null;
+        int calls = 0;
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => ParallaxRequestSource.EnsureSolutionAsync(request, "starless.tif",
+            _ => { calls++; return Task.FromResult(Result("blind")); }, CancellationToken.None, true, aligned));
+        Assert.Contains("starless", error.Message); Assert.Equal(0, calls); Assert.Null(request.Inputs.Wcs);
+    }
+    [Fact]
+    public async Task KnownStarlessWithExistingWcsNeedsNoStarsOrSolve()
+    {
+        var request = Request(); request.Inputs.Wcs = Result("header-checked").Wcs; request.Inputs.Stars = null;
+        Assert.Null(await ParallaxRequestSource.EnsureSolutionAsync(request, "starless.tif", _ => throw new InvalidOperationException(), CancellationToken.None, true, false));
+    }
+    [Fact]
+    public async Task UnalignedOrdinarySourceNeverSolvesTheSelectedStarsAndExplainsFailure()
+    {
+        var paths = new List<string>();
+        var error = await Assert.ThrowsAsync<SeizaCoreException>(() => ParallaxRequestSource.EnsureSolutionAsync(Request(), "original.fits", path =>
+        { paths.Add(path); return Task.FromException<SolveResult>(new SeizaCoreException("No match")); }, CancellationToken.None,
+            layersAligned: false, snapshotPath: "aligned-snapshot.png"));
+        Assert.Equal(["original.fits", "aligned-snapshot.png"], paths);
+        Assert.Contains("Enable Layers match", error.Message);
+    }
+    [Fact]
+    public void StarlessIdentityComparesPathsNotFilenameGuesses()
+    {
+        Assert.True(ParallaxRequestSource.SameSource("source/../source/image.tif", "source/image.tif"));
+        Assert.False(ParallaxRequestSource.SameSource("one/starless.tif", "two/starless.tif"));
+    }
     [Fact]
     public async Task AstronomyOriginalIsTriedBeforeThePrivateStarsLayer()
     {

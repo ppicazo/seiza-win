@@ -170,7 +170,8 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             OperationProgress.IsIndeterminate = Session.Progress is null;
             OperationProgress.Value = Math.Clamp(Session.Progress ?? 0, 0, 1);
             StatusText.Text = Session.ValidationMessage ??
-                (active && !Session.Activity.CancellationRequested ? Session.Activity.NetworkPhase : null) ?? Session.Status;
+                (active && !Session.Activity.CancellationRequested ? Session.Activity.NetworkPhase : null) ??
+                (!busy && !Session.CanPrepare ? Session.PreparationIssue : null) ?? Session.Status;
             CancelButton.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
             CancelButton.IsEnabled = Session.SourceReady && !Session.Activity.CancellationRequested;
             ShowVideoButton.Visibility = Session.ExportedPath is not null ? Visibility.Visible : Visibility.Collapsed;
@@ -342,18 +343,42 @@ public sealed partial class ParallaxWindow : Window, IDisposable
     }
 
     private void Slider(StackPanel panel, string title, Func<double> get, Action<double> set,
-        double minimum = 0, double maximum = 1)
+        double minimum = 0, double maximum = 1, Func<double, string>? format = null,
+        string? tooltip = null, double step = 0.01, bool retainRange = false)
     {
         var label = new TextBlock { FontSize = 12 };
         panel.Children.Add(label);
-        var slider = new Slider { Minimum = minimum, Maximum = maximum, Value = get(), StepFrequency = 0.01 };
+        var slider = new Slider { Minimum = retainRange ? Math.Min(minimum, get()) : minimum,
+            Maximum = retainRange ? Math.Max(maximum, get()) : maximum, Value = get(), StepFrequency = step };
         AutomationProperties.SetName(slider, title);
+        if (tooltip is not null) ToolTipService.SetToolTip(slider, tooltip);
         slider.ValueChanged += (_, args) =>
         {
             if (!_refreshing && !_closed) { set(args.NewValue); Refresh(); }
         };
         panel.Children.Add(slider);
-        _refreshControls.Add(() => { slider.Value = get(); label.Text = $"{title}: {get():0.##}"; });
+        _refreshControls.Add(() =>
+        {
+            if (retainRange) { slider.Minimum = Math.Min(minimum, get()); slider.Maximum = Math.Max(maximum, get()); }
+            slider.Value = get(); label.Text = $"{title}: {format?.Invoke(get()) ?? get().ToString("0.##", System.Globalization.CultureInfo.CurrentCulture)}";
+        });
+    }
+
+    private void ZoomControl(StackPanel panel, string title, Func<double> get, Action<double> set, double minimum = 1)
+    {
+        Slider(panel, title, get, set, minimum, 8, value => $"{value:0.##}×",
+            "Lens magnification: 0.5× gives a wider view, 1× is the base view, and 2× magnifies it. Dolly moves through depth instead. Overall zoom and camera fitting also apply.",
+            step: 0.05, retainRange: true);
+        var reset = Button(panel, "Reset to 1×", () => set(1));
+        AutomationProperties.SetName(reset, $"Reset {title} to 1×");
+    }
+
+    private void DollyControl(StackPanel panel, Func<double> get, Action<double> set)
+    {
+        Slider(panel, "Dolly", get, set, 0, 0.99, value => $"{value:P0}",
+            "Moves toward the background through depth. Reducing Dolly pulls back and changes how near stars move against the nebula; a high Dolly stays close even at Zoom 1×.");
+        var reset = Button(panel, "Reset Dolly to 0%", () => set(0));
+        AutomationProperties.SetName(reset, "Reset Dolly to 0%");
     }
 
     private void OptionalDistance(StackPanel panel, string title, string field, Func<double?> get, Action<double?> set,
@@ -398,7 +423,8 @@ public sealed partial class ParallaxWindow : Window, IDisposable
     {
         StackPanel source = Section("Source snapshot");
         Note(source, value: () => Session.SourceReady ? $"Source: {Session.Width:N0} × {Session.Height:N0} pixels · Filmed: {Session.FilmedRectangle[2]:N0} × {Session.FilmedRectangle[3]:N0}" : "Preparing full-resolution snapshot…");
-        Note(source, value: () => Session.SolveInformation?.SourceDescription ?? (Session.HasWcs ? "Sky coordinates available" : "The original astronomy file's headers are tried before solving the private stars/snapshot."));
+        Note(source, value: () => Session.SolvingDescription);
+        Note(source, value: () => Session.PreparationIssue ?? string.Empty, warning: true);
         Note(source, "Uses the current image adjustments. Imported layers must use the same stretch and alignment.");
         BuildCropInspector();
 
@@ -603,7 +629,8 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         Slider(generation, "Generated motion", () => Session.TourOptions.Motion, value => Session.TourOptions.Motion = value, 0, 2);
         Note(generation, "0 removes generated roll and pan. Options affect the next candidate, not the current draft.");
         Button generate = AsyncButton(generation, "Generate Tour", Session.GenerateTourAsync,
-            () => Session.SourceReady && !Session.CatalogsRunning);
+            () => Session.SourceReady && !Session.CatalogsRunning && Session.TourSolveIssue is null);
+        Note(generation, value: () => Session.TourSolveIssue ?? string.Empty, warning: true);
         _refreshControls.Add(() => generate.Content = Session.HasWcs ? "Generate Tour" : "Solve & Generate Tour");
         var candidate = new StackPanel { Spacing = 8 };
         generation.Children.Add(candidate);
@@ -622,13 +649,13 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             Button(fly, "Pick Destination", BeginPickDestination);
             Button(fly, "Use Image Center", () => Session.Edit(c => { c.Focus = Center(); c.FocusName = "Image center"; }));
             DestinationCoordinates(fly);
-            Slider(fly, "Dolly", () => Composition.Dolly, value => Session.Edit(c => c.Dolly = value), 0, 0.95);
+            DollyControl(fly, () => Composition.Dolly, value => Session.Edit(c => c.Dolly = value));
             Slider(fly, "Pan", () => Composition.Pan, value => Session.Edit(c => c.Pan = value));
             Number(fly, "Start roll (°)", () => Composition.RotationStart, value => Session.Edit(c => c.RotationStart = value));
             Number(fly, "End roll (°)", () => Composition.Rotation, value => Session.Edit(c => c.Rotation = value));
             RollExplanation(fly);
-            Number(fly, "Opening zoom", () => Composition.Zoom, value => Session.Edit(c => c.Zoom = value), 1, step: 0.1);
-            Number(fly, "End lens multiplier", () => Composition.ZoomEnd, value => Session.Edit(c => c.ZoomEnd = value), 1, step: 0.1);
+            ZoomControl(fly, "Opening zoom", () => Composition.Zoom, value => Session.Edit(c => c.Zoom = value));
+            ZoomControl(fly, "End lens multiplier", () => Composition.ZoomEnd, value => Session.Edit(c => c.ZoomEnd = value));
             Number(fly, "Sideways swing", () => Composition.Truck, value => Session.Edit(c => c.Truck = value), step: 0.01);
             Number(fly, "Swing direction (°)", () => Composition.TruckAngleDegrees,
                 value => Session.Edit(c => c.TruckAngleDegrees = value));
@@ -657,8 +684,14 @@ public sealed partial class ParallaxWindow : Window, IDisposable
             Number(stop, "Hold (s)", () => SelectedStop()?.Hold ?? 0,
                 value => Session.EditStop(s => s.Hold = value), 0, 600, 0.1);
             Note(stop, "Set hold to 0 to pass straight through. Glide, spin and push can keep a held stop moving.");
-            Slider(stop, "Dolly", () => SelectedStop()?.Dolly ?? 0, value => Session.EditStop(s => s.Dolly = value), 0, 0.95);
-            Number(stop, "Zoom", () => SelectedStop()?.Zoom ?? 1, value => Session.EditStop(s => s.Zoom = value), 0, step: 0.1);
+            DollyControl(stop, () => SelectedStop()?.Dolly ?? 0, value => Session.EditStop(s => s.Dolly = value));
+            ZoomControl(stop, "Zoom", () => SelectedStop()?.Zoom ?? 1, value => Session.EditStop(s => s.Zoom = value), 0.1);
+            Button(stop, "Pull Back", Session.PullBackStop);
+            Note(stop, "Pull Back resets Dolly, Zoom, Pan and Push while keeping this destination, its depth and timing.");
+            var wide = new StackPanel { Spacing = 8 }; stop.Children.Add(wide);
+            Note(wide, "Fill Frame may increase fitted zoom to hide image edges. Show Whole Image preserves a wider stop and permits black space; this changes framing for the entire video.");
+            Button(wide, "Show Whole Image for Entire Video", () => Session.Edit(c => c.Framing = "fit"), () => ParallaxCore.SupportsFraming);
+            _refreshControls.Add(() => wide.Visibility = SelectedStop()?.Zoom < 1 && Composition.Framing == "fill" ? Visibility.Visible : Visibility.Collapsed);
             Slider(stop, "Pan", () => SelectedStop()?.Pan ?? 0, value => Session.EditStop(s => s.Pan = value));
             Number(stop, "Roll (°)", () => SelectedStop()?.RotateDegrees ?? 0, value => Session.EditStop(s => s.RotateDegrees = value));
             StackPanel turns = ButtonRow(stop);
@@ -687,7 +720,7 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         if (Composition.Motion == ParallaxMotion.Tour)
         {
             StackPanel tour = Section("Tour motion");
-            Number(tour, "Overall zoom", () => Composition.Zoom, value => Session.Edit(c => c.Zoom = value), 1, step: 0.1);
+            ZoomControl(tour, "Overall zoom", () => Composition.Zoom, value => Session.Edit(c => c.Zoom = value));
             Note(tour, "Multiplies every stop’s zoom, including the opening stop.");
             Number(tour, "Glide through holds", () => Composition.TourGlide, value => Session.Edit(c => c.TourGlide = value), 0, step: 0.1);
             Note(tour, "A fraction of travel speed: 0 pauses, 0.2 glides gently. Spinning stops turn around their own destination.");

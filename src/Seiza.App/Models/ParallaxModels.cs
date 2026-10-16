@@ -63,6 +63,7 @@ public sealed record ParallaxStop
     public double? DepthParsecs { get; set; }
     [JsonIgnore] public string DisplayName => Name ?? (Focus is null ? "Whole Image" : "Custom Point");
     public ParallaxStop DeepClone() => this with { Focus = Focus?.ToArray() };
+    public void PullBack() { Dolly = 0; Zoom = 1; Pan = 0; Push = 0; }
 }
 
 public sealed record ParallaxTourOptions

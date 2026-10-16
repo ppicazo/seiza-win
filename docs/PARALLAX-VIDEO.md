@@ -22,7 +22,10 @@ orientation without passing through the viewer's eight-bit display bitmap.
    installed RC-Astro CLI (`rc-astro.exe`) licensed for StarXTerminator, or
    choose aligned starless/stars layers. Manual layers must have the source
    dimensions, matching orientation and stretch; confirm their alignment
-   before preparation. Neither RC-Astro's CLI nor StarXTerminator is bundled
+   before preparation. Alignment defaults on and importing/replacing layers
+   preserves your choice, including an explicit off. Disabled preparation
+   explains which input or alignment confirmation is missing.
+   Neither RC-Astro's CLI nor StarXTerminator is bundled
    or installed by Seiza. The viewer's plate solution is reused, including a
    solution obtained after opening the video window. Otherwise FITS/XISF sources
    are solved from their original headers first, falling back to the selected
@@ -31,6 +34,12 @@ orientation without passing through the viewer's eight-bit display bitmap.
    found the field. **Header coordinates (no confirming stars)** is an explicit
    warning, not a verified star match. Solving is cancellable with a two-minute
    limit on cores supporting the bounded solve API.
+   If the opened source is successfully selected as Starless, it is remembered
+   as a starless source even after replacing that layer. Without an existing
+   solution, only the aligned Stars layer is solved: neither the starless
+   original nor its snapshot is attempted. Missing Stars or alignment off
+   blocks solving immediately with an explanation. This policy is shared by
+   tour generation, preview preparation and export.
 2. In **Camera**, choose **Fly In** or **Tour**. Pick destinations on the image
    or enter source-pixel coordinates. Prepare a bounded preview, scrub or play
    it, then adjust the camera. Camera-only edits reuse the prepared scene;
@@ -61,6 +70,36 @@ centres use the filmed rectangle. Saved Windows itineraries include the crop
 and store crop-relative points; older itineraries use the current crop.
 
 ## Feature parity
+
+### Tour-point framing
+
+New custom points start wide (Dolly 0%, Zoom 1×), independently of the previous
+target. Adding, duplicating, reordering and deleting stops select the relevant
+stop and seek to its arrival; the refitted preview uses that time.
+
+Each stop has its own Dolly slider (0–99%, with a 0% reset) and Zoom slider
+(0.1–8× in 0.05 steps, expanding to retain imported values, with a 1× reset).
+Zoom changes lens magnification; Dolly moves through depth and changes how
+near stars move against the nebula. A high Dolly can remain close at Zoom 1×.
+Overall/opening/end zoom still has a minimum of 1× and independent resets.
+
+**Pull Back** resets the selected stop's Dolly, Zoom, Pan and Push while
+retaining its destination, name, depth and timing. It is undoable, unlike
+**Use Whole Image**, which clears the destination.
+
+Fill Frame may increase fitted zoom to keep image edges outside the video.
+A stop below Zoom 1× offers **Show Whole Image for Entire Video** explicitly;
+this changes the whole video's framing and permits black space for wider views.
+The preview inspector lists requested versus fitted adjustments.
+
+Release gate: the shared tour fitter still has a global-zoom fallback in Fill
+Frame. Widening one stop can therefore magnify the opening too; resetting that
+stop is not a fix for the coupling. Adopt and validate the upstream local-fit
+correction before shipping these controls. The regression must keep an unchanged
+opening unchanged when a different stop widens. Show Whole Image is an explicit
+workaround, not a correction to the Fill Frame fitter.
+
+### Shared composition controls
 
 The editor exposes the same composition controls as the Mac implementation:
 
