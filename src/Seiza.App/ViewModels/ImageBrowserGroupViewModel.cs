@@ -24,7 +24,8 @@ public sealed class ImageBrowserGroupViewModel : ObservableCollection<ImageBrows
 
     public string Key { get; }
     public string Label { get; }
-    public string HeaderText => $"{Label} ({_allItems.Length:N0})";
+    public string ItemCountText => $"({_allItems.Length:N0})";
+    public string HeaderText => $"{Label} {ItemCountText}";
     public string ChevronGlyph => IsExpanded ? "\uE70D" : "\uE76C";
     public string ToggleActionText => $"{(IsExpanded ? "Collapse" : "Expand")} {HeaderText}";
 
