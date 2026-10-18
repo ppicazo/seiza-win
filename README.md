@@ -425,6 +425,18 @@ an idle L stack does not prevent R from updating. Filter identity comes from
 the image header, falling back to recognized filename tokens, not arbitrary
 folder names. Files with neither are grouped as **Unfiltered**.
 
+The **All filters** overview shows every discovered filter's latest preview,
+frame counts and status together, including waiting, paused and failed stacks.
+Tiles reflow as the window resizes and scroll for larger sessions. Select a tile
+or use the filter picker to open its detailed preview and SNR chart; switch back
+with the **Preview view** toggle. Snapshot and Finish require an individual
+filter view, while Pause and save always applies to the whole session.
+
+Change **Preview stretch (display only)** while running or paused to compare Auto
+MTF, Median Anchor and Layered across all filters. New filters inherit the current
+choice. These redraws never change the integrated linear pixels or exported FITS;
+Layered defaults to linked color so both mono and RGB stacks work.
+
 Seiza waits until each FITS or XISF file has stopped changing, checks
 that it is a raw, compatible light frame, revalidates it against the active
 masters, and registers it into a filter-locked stack. File-system notifications

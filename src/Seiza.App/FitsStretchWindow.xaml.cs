@@ -753,7 +753,7 @@ public sealed partial class FitsStretchWindow : Window
         }
         Configuration.Type = choice.Type;
         if (choice.Type == FitsStretchType.Layered)
-            Configuration.ColorStrategy = FitsStretchColorStrategy.LuminancePreserving;
+            Configuration.ColorStrategy = FitsStretchColorStrategy.Linked;
         if (choice.Type == FitsStretchType.MedianAnchor)
             Configuration.TargetMedian = 0.25;
         RefreshEditor();
@@ -769,7 +769,7 @@ public sealed partial class FitsStretchWindow : Window
         Configuration.ColorStrategy = choice.Strategy;
         if (Configuration.Type == FitsStretchType.Layered && choice.Strategy == FitsStretchColorStrategy.Unlinked)
         {
-            Configuration.ColorStrategy = FitsStretchColorStrategy.LuminancePreserving;
+            Configuration.ColorStrategy = FitsStretchColorStrategy.Linked;
             RefreshEditor();
         }
         ColorHelpText.Text = ColorHelp();

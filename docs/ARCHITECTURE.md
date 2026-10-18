@@ -175,6 +175,21 @@ Windows CI.
     groups, not just the selected one. A failed filter does not stop discovery
     or ingestion in the others. RC-Astro's executable path is a persistent user
     setting, observed by each open Parallax session.
+    The live overview projects every group's current snapshot into stable,
+    keyboard-accessible tiles. It reuses bounded native previews without extra
+    rendering jobs, uploads only changed images, and releases tile GPU resources
+    when returning to the individual view or closing. Layout and presentation
+    never alter accumulator state or the selected filter's export scope.
+    Live stretch changes use each coordinator's operation gate and redraw even
+    when paused; newly discovered groups inherit the session's current recipe.
+    A serialized registry publication is flushed before a completed child's
+    checkpoint is retired. Failed publication leaves that checkpoint recoverable.
+    Export preflight and final publication check all groups' inputs/calibration,
+    the complete capture/checkpoint trees, resolved paths and hard-link aliases.
+    Calibration preparation errors stop just the affected filter without counting
+    readable lights as unreadable or automatically repeating a declined review.
+    RC-Astro changes coalesce until the receiving Parallax window has no active
+    native operations, frame renders or refits, preserving those operations' inputs.
 20. RGB/LRGB file composition uses the shared C ABI; Windows requires explicit
     confirmation of a common alignment grid. The small platform color adapter
     reads linear FITS/XISF, calls `seiza-stacking` Gaia calibration, and writes

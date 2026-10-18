@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Seiza.App.Models;
 
 namespace Seiza.App.Services;
 
@@ -19,6 +20,22 @@ internal static class CatalogSettingsStore
         {
             return LoadSettings().CatalogDirectory;
         }
+    }
+
+    public static ImageBrowserGrouping LoadBrowserGrouping(string? path = null)
+    {
+        lock (SyncRoot)
+        {
+            return Enum.TryParse(LoadSettings(path).BrowserGrouping, out ImageBrowserGrouping value) && Enum.IsDefined(value)
+                ? value : ImageBrowserGrouping.Folder;
+        }
+    }
+
+    public static void SaveBrowserGrouping(ImageBrowserGrouping grouping, string? path = null)
+    {
+        if (!Enum.IsDefined(grouping)) throw new ArgumentOutOfRangeException(nameof(grouping));
+        lock (SyncRoot)
+            SaveSettings(LoadSettings(path) with { BrowserGrouping = grouping.ToString() }, path);
     }
 
     public static string? LoadRcAstroExecutable()
@@ -132,6 +149,7 @@ internal static class CatalogSettingsStore
     {
         public string? CatalogDirectory { get; init; }
         public string? RcAstroExecutable { get; init; }
+        public string BrowserGrouping { get; init; } = "Folder";
 
         public bool AutomaticallyCheckForUpdates { get; init; } = true;
 

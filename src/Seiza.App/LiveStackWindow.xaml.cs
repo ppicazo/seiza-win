@@ -71,6 +71,38 @@ public sealed partial class LiveStackWindow : Window, IDisposable
 
     private bool IsConfigured => ConfigurationScrollViewer.Visibility == Visibility.Visible;
 
+    private bool ShowingOverview => _session is not null && AllFiltersToggle.IsOn;
+
+    private async void RunningStretch_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_initializing || _closed || _busy || IsConfigured || (_session is null && _coordinator is null)) return;
+        SetBusy(true);
+        try
+        {
+            var type = Enum.Parse<FitsStretchType>(SelectedTag(RunningStretchPicker));
+            if (_session is not null) await _session.SetPreviewStretchAsync(type);
+            else if (_coordinator is not null) await _coordinator.SetPreviewStretchAsync(type);
+        }
+        catch (Exception exception) { if (!_closed) ShowRunError(exception.Message); }
+        finally { SetBusy(false); }
+    }
+
+    private void AllFilters_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_initializing || _closed || _session is null) return;
+        RefreshSessionGroups();
+    }
+
+    private void OpenOverviewFilter(string key)
+    {
+        if (_closed || _busy) return;
+        LiveStackFilterGroup? group = _displayedGroups.FirstOrDefault(group => group.Filter.Key == key);
+        if (group is null) return;
+        SelectGroup(group);
+        AllFiltersToggle.IsOn = false;
+        RefreshSessionGroups();
+    }
+
     private void ContentRoot_Loaded(object sender, RoutedEventArgs e)
     {
         if (_loaded)
@@ -518,6 +550,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
             pendingCalibration = null;
             _runOperationError = null;
             ConfigurationScrollViewer.Visibility = Visibility.Collapsed;
+            RunningStretchPicker.SelectedIndex = LiveStretchPicker.SelectedIndex;
             RunningPanel.Visibility = Visibility.Visible;
             _checkpointAgeTimer.Start();
             PauseButton.Visibility = Visibility.Visible;
@@ -789,6 +822,19 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         {
             LiveStackFilterGroup[] groups = _session.Groups.ToArray();
             _displayedGroups = groups;
+            OverviewScroll.Visibility = ShowingOverview ? Visibility.Visible : Visibility.Collapsed;
+            SinglePreviewPanel.Visibility = ShowingOverview ? Visibility.Collapsed : Visibility.Visible;
+            AllFiltersToggle.IsEnabled = !_busy;
+            if (ShowingOverview)
+            {
+                _previewBitmap?.Dispose();
+                _previewBitmap = null;
+                _displayedPreview = null;
+                FilterOverview.OpenFilter = OpenOverviewFilter;
+                FilterOverview.SetItems(groups.Select(group => LiveStackOverviewItem.Create(
+                    group.Filter, group.Coordinator.CurrentSnapshot, group.Completed, group.Error)).ToArray(), !_busy);
+            }
+            else FilterOverview.Clear();
             LiveStackFilterGroup? selected = groups.FirstOrDefault(group => ReferenceEquals(group.Coordinator, _coordinator)) ?? groups.FirstOrDefault();
             FilterGroupPicker.ItemsSource = groups.Select(group => group.ToString()).ToArray();
             FilterGroupPicker.SelectedIndex = selected is null ? -1 : Array.IndexOf(groups, selected);
@@ -805,6 +851,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
     {
         if (_updatingGroups || _session is null) return;
         SelectGroup(_displayedGroups.ElementAtOrDefault(FilterGroupPicker.SelectedIndex));
+        AllFiltersToggle.IsOn = false;
         RefreshSessionGroups();
     }
 
@@ -907,7 +954,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         AttentionCard.Visibility = hasAttention ? Visibility.Visible : Visibility.Collapsed;
         AttentionList.ItemsSource = hasAttention ? attention : null;
 
-        if (snapshot.Preview is not null &&
+        if (!ShowingOverview && snapshot.Preview is not null &&
             !ReferenceEquals(_displayedPreview, snapshot.Preview))
         {
             try
@@ -951,8 +998,8 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         if (_session is not null)
         {
             bool completed = snapshot.State == LiveStackRunState.Completed;
-            PrimaryButton.IsEnabled &= !completed;
-            SnapshotButton.IsEnabled &= !completed;
+            PrimaryButton.IsEnabled &= !completed && !ShowingOverview;
+            SnapshotButton.IsEnabled &= !completed && !ShowingOverview;
             PauseButton.Content = _session.IsPaused ? "Resume all filters" : "Pause and save all";
             PauseButton.IsEnabled = !_busy;
         }
@@ -1287,6 +1334,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
             return;
         }
         ConfigurationScrollViewer.IsEnabled = !busy;
+        RunningStretchPicker.IsEnabled = !busy;
         if (IsConfigured)
         {
             UpdateConfigurationState();
@@ -1496,6 +1544,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         _previewBitmap?.Dispose();
         _previewBitmap = null;
         _displayedPreview = null;
+        FilterOverview.Dispose();
         _checkpointAgeTimer.Stop();
         _checkpointAgeTimer.Tick -= CheckpointAgeTimer_Tick;
         PreviewCanvas.RemoveFromVisualTree();

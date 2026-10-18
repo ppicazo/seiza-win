@@ -11,6 +11,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\Seiza.App\Models\LiveStackOverviewItem.cs" Link="Models\LiveStackOverviewItem.cs" />
+    <Compile Include="..\..\src\Seiza.App\Models\DeferredSettingsUpdate.cs" Link="Models\DeferredSettingsUpdate.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\FlatQuality.cs" Link="Models\FlatQuality.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\FlatQualityService.cs" Link="Services\FlatQualityService.cs" />
     <Content Include="$(SeizaNativeDll)" Condition="Exists('$(SeizaNativeDll)')">
