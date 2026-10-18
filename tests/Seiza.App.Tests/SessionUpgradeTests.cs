@@ -192,5 +192,43 @@ public sealed class SessionUpgradeTests : IDisposable
         while (!ready()) await Task.Delay(100, timeout.Token);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FlatReviewApprovalGatesOneFilterWithoutStoppingAnother(bool automaticReference)
+    {
+        string lights = Path.Combine(_root, "review-lights");
+        Directory.CreateDirectory(lights);
+        StackingOptionsNativeTests.WriteStarField(Path.Combine(lights, "capture_L.fits"), 0, false, 128);
+        StackingOptionsNativeTests.WriteStarField(Path.Combine(lights, "capture_R.fits"), 0, false, 128);
+        var approve = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int requests = 0;
+        var configuration = new LiveStackRunConfiguration { WatchFolder = lights,
+            SessionRootDirectory = Path.Combine(_root, "review-session"), PreviewMaxDimension = 64,
+            ChooseReferenceAutomatically = automaticReference, Options = new() { RemoveTransients = false } };
+        await using var session = new LiveStackSessionCoordinator(configuration, async (reference, token) =>
+        {
+            if (LiveStackFilterIdentity.FromProbe(reference).Key == "luminance")
+            {
+                Interlocked.Increment(ref requests);
+                if (!await approve.Task.WaitAsync(token)) throw new OperationCanceledException("Flat review declined", token);
+            }
+            return new CalibrationPreparationResult { Calibration = new(), Summaries = [], Warnings = [] };
+        });
+        await session.StartAsync();
+        await Until(() => session.Groups.Count == 2 && requests == 1 &&
+            session.Groups.Single(group => group.Filter.Key == "red").Coordinator.CurrentSnapshot.AcceptedFrames == 1);
+        var luminance = session.Groups.Single(group => group.Filter.Key == "luminance");
+        Assert.Equal(0, luminance.Coordinator.CurrentSnapshot.AcceptedFrames);
+        approve.SetResult(false);
+        await Until(() => luminance.Error is not null || luminance.Coordinator.CurrentSnapshot.State == LiveStackRunState.Faulted);
+        StackingOptionsNativeTests.WriteStarField(Path.Combine(lights, "second_L.fits"), 1, false, 128);
+        StackingOptionsNativeTests.WriteStarField(Path.Combine(lights, "second_R.fits"), 1, false, 128);
+        await Until(() => session.Groups.Single(group => group.Filter.Key == "red").Coordinator.CurrentSnapshot.AcceptedFrames == 2);
+        Assert.Equal(0, luminance.Coordinator.CurrentSnapshot.AcceptedFrames);
+        Assert.Equal(1, requests);
+        await session.PauseAndSaveAsync();
+    }
+
     public void Dispose() => Directory.Delete(_root, recursive: true);
 }

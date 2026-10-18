@@ -3,6 +3,7 @@
     x:Class="Seiza.App.ImageStackWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Seiza.App"
     Title="Stack Images">
 
     <Window.SystemBackdrop>
@@ -334,6 +335,7 @@
                                     <Button AutomationProperties.Name="Choose calibration library folder" Grid.Column="1" Click="ChooseCalibrationLibrary_Click" Content="Choose…" />
                                 </Grid>
                                 <TextBlock x:Name="AutomaticCalibrationHintText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                <local:FlatQualityOptionsControl x:Name="FlatQualityOptions" />
                             </StackPanel>
                         </StackPanel>
                     </Expander>

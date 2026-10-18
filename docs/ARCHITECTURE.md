@@ -195,6 +195,20 @@ Windows CI.
     learned correction on top of a new dark or different bias/flat. Master-cache fingerprints use the native
     stacking-output version (the legacy manifest field remains `CoreVersion`).
     Output-version pointers are static and must not be freed.
+22. Optional flat quality review passes the native metadata planner's exact
+    selected raw paths to `seiza_calibration_measure_flat_json` and sends complete
+    typed measurements back to `seiza_calibration_screen_flats_json`. No quality
+    thresholds, pixel measurements, dust geometry or selection decisions are
+    implemented in C#. Review runs independently of master-cache hits, one native
+    frame at a time behind a shared gate, with identity and cancellation checks
+    before publication. Failure produces an explicit warning, not a partial
+    passing report. Quality options do not change master cache fingerprints.
+    Windows owns report presentation, expandable details, complete clipboard
+    reports and explicit continue/cancel. New live filter groups await review
+    separately; dialogs are serialized and cancellation/close releases waits.
+    Checkpoint resume retains its prior calibration rather than requiring raw
+    frames again. Native master predictions remain distinct from actual built
+    master findings and existing preparation warnings.
 
 ## Performance rules
 

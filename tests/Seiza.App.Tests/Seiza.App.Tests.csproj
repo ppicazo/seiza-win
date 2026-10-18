@@ -11,6 +11,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\Seiza.App\Models\FlatQuality.cs" Link="Models\FlatQuality.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\FlatQualityService.cs" Link="Services\FlatQualityService.cs" />
     <Content Include="$(SeizaNativeDll)" Condition="Exists('$(SeizaNativeDll)')">
       <Link>seiza_cabi.dll</Link>
       <!-- An explicit validation DLL may be older than the previous run's

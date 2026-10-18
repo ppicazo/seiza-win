@@ -567,8 +567,9 @@ public sealed partial class ImageStackWindow : Window, IDisposable
                 : null;
             using BatchCalibrationPreparation prepared = await PrepareCalibrationsAsync(
                 alignmentReference, cancellation.Token);
-            if (prepared.Warnings.Count > 0 &&
-                !await ConfirmCalibrationWarningsAsync(prepared.Warnings))
+            FlatQualityReview[] reviews = prepared.Results.SelectMany(result => result.FlatQualityReviews).ToArray();
+            if ((prepared.Warnings.Count > 0 || reviews.Length > 0) &&
+                !await ConfirmCalibrationWarningsAsync(prepared.Warnings, reviews))
             {
                 cancellation.Token.ThrowIfCancellationRequested();
                 if (!_closeWhenIdle)
@@ -674,6 +675,8 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         }
 
         string libraryPath = Path.GetFullPath(_calibrationLibraryPath!);
+        var quality = FlatQualityOptions.ReadOptions();
+        quality.Validate();
         string cacheDirectory = CalibrationCachePaths.ForLibrary(libraryPath);
         var service = new CalibrationPreparationService();
         var calibrations = new Dictionary<string, ImageStackCalibration>(StringComparer.Ordinal);
@@ -738,10 +741,13 @@ public sealed partial class ImageStackWindow : Window, IDisposable
                         SourcePaths = [libraryPath],
                         CacheDirectory = cacheDirectory,
                         ProtectedMasterPaths = protectedMasterPaths.ToArray(),
+                        Options = new() { FlatQuality = quality },
                     },
                     progress,
                     cancellationToken);
                 results.Add(result);
+                for (int reviewIndex = 0; reviewIndex < result.FlatQualityReviews.Length; reviewIndex++)
+                    result.FlatQualityReviews[reviewIndex] = result.FlatQualityReviews[reviewIndex] with { GroupTitle = group.Title };
                 calibrations[group.Id] = result.Calibration.Copy();
                 warnings.AddRange(result.Warnings.Select(warning => $"{group.Title}: {warning}"));
                 foreach (string masterPath in result.Summaries
@@ -810,26 +816,9 @@ public sealed partial class ImageStackWindow : Window, IDisposable
             outcomes.Select(outcome => outcome.Warning).OfType<string>().ToArray());
     }
 
-    private async Task<bool> ConfirmCalibrationWarningsAsync(IReadOnlyList<string> warnings)
+    private async Task<bool> ConfirmCalibrationWarningsAsync(IReadOnlyList<string> warnings, FlatQualityReview[] reviews)
     {
-        string content = CalibrationPreparationWarningText.Format(warnings);
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Content.XamlRoot,
-            Title = "Calibration needs attention",
-            Content = new ScrollViewer
-            {
-                MaxHeight = 320,
-                Content = new TextBlock
-                {
-                    Text = content,
-                    TextWrapping = TextWrapping.Wrap,
-                },
-            },
-            PrimaryButtonText = "Continue stacking",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-        };
+        var dialog = CalibrationReviewDialog.Create(Content.XamlRoot, warnings, reviews, "Continue stacking");
         return await ShowDialogAsync(dialog) == ContentDialogResult.Primary;
     }
 

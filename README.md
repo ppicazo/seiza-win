@@ -324,6 +324,41 @@ a new stack, so a learned correction cannot be combined with a new dark.
 Calibration-master caches use the native stacking-output version, so unrelated
 core releases no longer force identical masters to be rebuilt.
 
+## Flat quality review (development builds)
+
+In directory or live stacking, choose automatic calibration and enable
+**Review flat quality before stacking**. This follows the workflow in
+[Mac #76](https://github.com/theatrus/seiza-mac/pull/76): native Seiza measures
+the exact selected raw flats, even when the master is reused from cache.
+The Calibration Review dialog shows reviewed/suspect/poor counts, individual
+flagged frames, preparation warnings, and a separate combined-master prediction.
+Continue keeps the same selection; Cancel stops before processing lights.
+There is no automatic exclusion, reordering, or replacement of flats.
+
+Set **Saturation level** to the file's raw units (commonly 65535 for 16-bit ADU
+or 1 for normalized samples). Optional **Estimate dust distance** needs focal
+ratio, pixel size after camera binning, and obstruction diameter as a percentage
+of the aperture. For 3.76 µm pixels with 2×2 binning, enter 7.52 µm. Distances are
+estimates, not identification of a dirty surface. Steady dust is what flats
+correct; vignetting is reported separately, and detection counts across frames
+are not counts of unique particles.
+
+Expand **Dust and vignetting details** for more information. The first ten
+flagged frames appear initially; **Show all** reveals the rest. **Copy Report**
+always includes every finding, native value/limit, illumination grid and feature
+geometry, including collapsed details. The combined-master verdict predicts the
+selected set; it does not measure the built master or determine which flat
+session best matches a light. Existing metadata and pedestal safety gates remain
+in force.
+
+Multi-filter live sessions review each new filter before it starts ingestion.
+Cancelling one filter's review leaves other filters running; pause/resume the
+session to retry. Restored checkpoints retain their existing calibration and do
+not invoke a new raw-flat review. Reviews are not cached or persisted. Failed
+reviews show an explicit incomplete-review warning, never a passing partial
+result. Cancellation waits for the current native measurement to return and
+discards the result; source identities are checked around the whole review.
+
 ## Directory image stacking
 
 - Directory image stacking registers and combines selected FITS or XISF

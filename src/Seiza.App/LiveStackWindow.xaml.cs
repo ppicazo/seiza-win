@@ -15,6 +15,7 @@ namespace Seiza.App;
 
 public sealed partial class LiveStackWindow : Window, IDisposable
 {
+    private static readonly SemaphoreSlim CalibrationReviewGate = new(1, 1);
     private void ColorStack_Click(object sender, RoutedEventArgs e) => App.ShowColorStack();
 
     private readonly TaskCompletionSource<string?> _completion = new(
@@ -477,8 +478,8 @@ public sealed partial class LiveStackWindow : Window, IDisposable
                     await PrepareAutomaticCalibrationAsync(preparationCancellation.Token);
                 pendingCalibration = prepared;
                 _initialReferencePath = referencePath;
-                if (prepared.Warnings.Length > 0 &&
-                    !await ConfirmCalibrationWarningsAsync(prepared.Warnings))
+                if ((prepared.Warnings.Length > 0 || prepared.FlatQualityReviews.Length > 0) &&
+                    !await ConfirmCalibrationWarningsAsync(prepared.Warnings, prepared.FlatQualityReviews, preparationCancellation.Token))
                 {
                     preparationCancellation.Token.ThrowIfCancellationRequested();
                     ShowConfigurationError(
@@ -595,6 +596,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
                 SourcePaths = [Path.GetFullPath(CalibrationFolderTextBox.Text)],
                 CacheDirectory = cacheDirectory,
                 ProtectedMasterPaths = alignmentReferencePath is null ? [] : [alignmentReferencePath],
+                Options = new() { FlatQuality = FlatQualityOptions.ReadOptions() },
             },
             progress,
             cancellationToken);
@@ -603,31 +605,24 @@ public sealed partial class LiveStackWindow : Window, IDisposable
     }
 
     private async Task<bool> ConfirmCalibrationWarningsAsync(
-        string[] warnings)
+        string[] warnings, FlatQualityReview[] reviews, CancellationToken token)
     {
-        string content = CalibrationPreparationWarningText.Format(warnings);
+        var dialog = CalibrationReviewDialog.Create(Content.XamlRoot, warnings, reviews, "Start live stacking");
+        return await ShowTrackedDialogAsync(dialog, token) == ContentDialogResult.Primary;
+    }
 
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Content.XamlRoot,
-            Title = "Calibration needs attention",
-            Content = new ScrollViewer
-            {
-                MaxHeight = 320,
-                Content = new TextBlock
-                {
-                    Text = content,
-                    TextWrapping = TextWrapping.Wrap,
-                },
-            },
-            PrimaryButtonText = "Start live stacking",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-        };
-        _activeDialog = dialog;
+    private async Task<ContentDialogResult> ShowTrackedDialogAsync(ContentDialog dialog, CancellationToken token = default)
+    {
+        await CalibrationReviewGate.WaitAsync(token);
         try
         {
-            return await dialog.ShowAsync() == ContentDialogResult.Primary;
+            token.ThrowIfCancellationRequested();
+            if (_closed || _closeInProgress) throw new OperationCanceledException(token);
+            _activeDialog = dialog;
+            using var registration = token.Register(() => DispatcherQueue.TryEnqueue(() => dialog.Hide()));
+            var result = await dialog.ShowAsync();
+            token.ThrowIfCancellationRequested();
+            return result;
         }
         finally
         {
@@ -635,6 +630,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
             {
                 _activeDialog = null;
             }
+            CalibrationReviewGate.Release();
         }
     }
 
@@ -715,15 +711,11 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         {
             string library = CalibrationFolderTextBox.Text;
             string? alignment = configuration.AlignmentReferencePath;
+            var quality = SelectedTag(CalibrationModePicker) == "Automatic" ? FlatQualityOptions.ReadOptions() : new FlatQualityOptions();
+            quality.Validate();
             Func<CalibrationFrameProbe, CancellationToken, Task<CalibrationPreparationResult>>? prepare =
                 SelectedTag(CalibrationModePicker) == "Automatic"
-                ? (reference, token) => new CalibrationPreparationService().PrepareAsync(new CalibrationPreparationRequest
-                {
-                    Reference = reference,
-                    SourcePaths = [Path.GetFullPath(library)],
-                    CacheDirectory = CalibrationCachePaths.ForLibrary(library),
-                    ProtectedMasterPaths = alignment is null ? [] : [alignment],
-                }, null, token)
+                ? (reference, token) => PrepareFilterCalibrationAsync(reference, library, alignment, quality, token)
                 : null;
             var session = new LiveStackSessionCoordinator(configuration with
             {
@@ -743,6 +735,40 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         _runCancellation = cancellation;
         _runTask = ObserveRunAsync(coordinator, cancellation.Token);
         await Task.Yield();
+    }
+
+    private async Task<CalibrationPreparationResult> PrepareFilterCalibrationAsync(CalibrationFrameProbe reference,
+        string library, string? alignment, FlatQualityOptions quality, CancellationToken token)
+    {
+        var result = await new CalibrationPreparationService().PrepareAsync(new CalibrationPreparationRequest
+        {
+            Reference = reference, SourcePaths = [Path.GetFullPath(library)],
+            CacheDirectory = CalibrationCachePaths.ForLibrary(library),
+            ProtectedMasterPaths = alignment is null ? [] : [alignment],
+            Options = new() { FlatQuality = quality },
+        }, null, token).ConfigureAwait(false);
+        try
+        {
+            string group = LiveStackFilterIdentity.FromProbe(reference).DisplayName;
+            for (int i = 0; i < result.FlatQualityReviews.Length; i++)
+                result.FlatQualityReviews[i] = result.FlatQualityReviews[i] with { GroupTitle = group };
+            if (result.Warnings.Length > 0 || result.FlatQualityReviews.Length > 0)
+            {
+                var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                if (!DispatcherQueue.TryEnqueue(async () =>
+                {
+                    try { completion.TrySetResult(await ConfirmCalibrationWarningsAsync(
+                        result.Warnings.Select(warning => $"{group}: {warning}").ToArray(), result.FlatQualityReviews, token)); }
+                    catch (OperationCanceledException) { completion.TrySetCanceled(token); }
+                    catch (Exception error) { completion.TrySetException(error); }
+                })) throw new OperationCanceledException("The live stack window is no longer available.", token);
+                if (!await completion.Task.ConfigureAwait(false))
+                    throw new OperationCanceledException($"Calibration review cancelled for {group}; no lights processed. Restart the session to review again.", token);
+            }
+            token.ThrowIfCancellationRequested();
+            return result;
+        }
+        catch { result.Dispose(); throw; }
     }
 
     private void Session_Changed(object? sender, EventArgs e)
@@ -1220,18 +1246,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
             CloseButtonText = "OK",
             DefaultButton = ContentDialogButton.Close,
         };
-        _activeDialog = dialog;
-        try
-        {
-            await dialog.ShowAsync();
-        }
-        finally
-        {
-            if (ReferenceEquals(_activeDialog, dialog))
-            {
-                _activeDialog = null;
-            }
-        }
+        await ShowTrackedDialogAsync(dialog);
     }
 
     private async Task<LiveStackOutputSelection?> PickOutputPathAsync(string suggestedName)

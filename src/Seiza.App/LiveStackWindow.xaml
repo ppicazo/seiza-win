@@ -368,6 +368,7 @@
                                 </Grid>
                                 <ProgressBar x:Name="CalibrationProgressBar" IsIndeterminate="False" Maximum="1" Minimum="0" Visibility="Collapsed" />
                                 <TextBlock x:Name="CalibrationSummaryText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                <local:FlatQualityOptionsControl x:Name="FlatQualityOptions" />
                             </StackPanel>
                         </StackPanel>
                     </Border>
