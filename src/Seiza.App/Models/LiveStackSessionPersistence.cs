@@ -58,6 +58,9 @@ internal sealed record LiveStackPersistedState
     public bool IncludesSubdirectories { get; init; }
     public string OutputPath { get; init; } = string.Empty;
     public string StackOptionsJson { get; init; } = string.Empty;
+    // Host policy, separate from the native options JSON. Older sessions did
+    // not learn defect maps and deserialize this as false.
+    public bool LearnDefects { get; init; }
     public DateTimeOffset CreatedAtUtc { get; init; }
     public DateTimeOffset UpdatedAtUtc { get; init; }
     public LiveStackCalibrationEpoch[] CalibrationHistory { get; init; } = [];

@@ -93,8 +93,8 @@ See the [Windows parallax guide](docs/PARALLAX-VIDEO.md) for layer requirements,
 camera and tour controls, encoder availability and export limits. Windows
 0.8.4 uses published Seiza/C ABI 0.33.0, stacking 0.36.0, parallax 0.10.0 and
 image-io 0.8.0 crates, without vendored patches.
-Development builds now use Seiza/C ABI 0.38.0, stacking 0.41.0, parallax
-0.15.0, image-io 0.9.0, and stretch 0.3.0 from published crates.
+Development builds now use Seiza/C ABI 0.39.0, stacking 0.42.0, parallax
+0.16.0, image-io 0.9.0, and stretch 0.3.1 from published crates.
 
 ## Image viewing and folder review
 
@@ -288,6 +288,41 @@ without a Windows restart.
 | FITS capture sequence | XISF processing folder |
 | --- | --- |
 | ![Autostretched FITS content thumbnails in Windows File Explorer](docs/images/explorer-fits-thumbnails.png) | ![Mono and color XISF content thumbnails in Windows File Explorer](docs/images/explorer-xisf-thumbnails.png) |
+
+## Color stacking and calibration (development builds)
+
+Open **Color stacking** from the main toolbar to combine linear R, G and B
+stacks, optionally with luminance, or calibrate an existing RGB/OSC stack.
+Channel stacks must already share an alignment reference and pixel grid;
+matching dimensions alone are not enough. Save stable snapshots from each
+live filter stack first. Composition does not perform another registration.
+
+Gaia calibration is intended for broadband color, not narrowband palettes.
+The dialog can explicitly download the offline Gaia photometry catalog into
+the configured catalog directory. The default workflow solves/verifies the
+composed image using your solve catalogs, then performs native photometric
+calibration before any display stretch. Turning verification off uses the
+image's existing WCS. Missing catalogs, insufficient stars and other skipped
+outcomes are reported without publishing a partial result.
+
+Results are separate linear FITS or XISF files; source stacks are never
+modified. Output is staged beside the destination and published only on
+success. Calibrated files retain their WCS and a `SEIZAPCC=GAIA` marker.
+Seiza uses linked RGB or luminance-preserving stretches for marked files on
+reopen, preview and display export, keeping their calibrated color balance.
+An already marked image cannot be calibrated again; use its original stack.
+
+Directory and live stacking also offer **Learn sensor defects from dithered
+lights (no master dark)**. This opt-in native hot/dead-pixel map needs at least
+three compatible lights and actual dithering or drift; stationary stars can
+otherwise resemble persistent sensor defects. Do not enable it with a master
+dark. Live stacks wait for three compatible frames per filter, learn once,
+and retain that fixed map in their checkpoint, including after restart without
+the original captures. Changing this policy or its calibration masters requires
+a new stack, so a learned correction cannot be combined with a new dark.
+
+Calibration-master caches use the native stacking-output version, so unrelated
+core releases no longer force identical masters to be rebuilt.
 
 ## Directory image stacking
 

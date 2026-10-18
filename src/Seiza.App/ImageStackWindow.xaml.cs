@@ -346,6 +346,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
             ? StackCfaIntegration.BayerDrizzle
             : StackCfaIntegration.Demosaic,
         SuppressHotPixels = SuppressHotPixelsToggle.IsOn,
+        LearnDefects = LearnDefectsToggle.IsOn,
         CosmeticLowSigma = CosmeticLowSigmaBox.Value,
         CosmeticHighSigma = CosmeticHighSigmaBox.Value,
         Rejection = SelectedTag(RejectionPicker) == "None"

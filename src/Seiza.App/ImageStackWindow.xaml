@@ -238,6 +238,8 @@
                                             <ComboBoxItem Content="Bayer drizzle" Tag="BayerDrizzle" />
                                         </ComboBox>
                                     </Grid>
+                                    <ToggleSwitch x:Name="LearnDefectsToggle" Header="Learn sensor defects from dithered lights (no master dark)" IsOn="False" Toggled="Options_Changed" />
+                                    <TextBlock Text="Requires at least three lights with dithering or drift. Seiza learns persistent hot/dead pixels before integrating, separately from per-frame cosmetic filtering." TextWrapping="Wrap" />
                                     <ToggleSwitch x:Name="SuppressHotPixelsToggle" Header="Suppress hot and dead pixels" IsOn="False" Toggled="Options_Changed" ToolTipService.ToolTip="Replace isolated impulse pixels after calibration and before demosaicing. Conservative defaults preserve star structure." />
                                     <Grid x:Name="CosmeticOptionsPanel" ColumnSpacing="12" Visibility="Collapsed">
                                         <Grid.ColumnDefinitions>

@@ -281,6 +281,8 @@ public sealed partial class MainPage : Page, IDisposable
         $"an ideal square-root stack at this depth improves {analysis.IdealImprovement:N2}× " +
         $"({analysis.Efficiency:P0} efficiency).";
 
+    private void ColorStack_Click(object sender, RoutedEventArgs e) => App.ShowColorStack();
+
     private async void LiveStack_Click(object sender, RoutedEventArgs e)
     {
         if (_disposed)
@@ -441,7 +443,8 @@ public sealed partial class MainPage : Page, IDisposable
             currentProcessing.StretchStack,
             currentProcessing.BackgroundConfiguration,
             currentProcessing.Deconvolution,
-            SupportsColorStretch(_currentMetadata));
+            SupportsColorStretch(_currentMetadata),
+            _currentMetadata!.Headers.TryGetValue("SEIZAPCC", out var marker) && marker.ToString() == "GAIA");
         _stretchWindow = window;
         window.PreviewRequested = request => PreviewStretchAsync(path, request);
         window.PickSymmetryPointRequested = BeginSymmetryPointPicker;

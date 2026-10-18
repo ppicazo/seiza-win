@@ -110,6 +110,13 @@ public partial class App : Application
         RegisterIndependentWindow(window);
     }
 
+    internal static void ShowColorStack(string? rgb = null)
+    {
+        var window = new ColorStackWindow(rgb);
+        RegisterIndependentWindow(window);
+        window.Activate();
+    }
+
     private static void RegisterIndependentWindow(Window window)
     {
         if (IndependentWindows.Add(window)) window.Closed += IndependentWindow_Closed;

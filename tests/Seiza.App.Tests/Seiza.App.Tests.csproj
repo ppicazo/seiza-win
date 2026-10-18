@@ -17,6 +17,10 @@
            DLL. Always copy the selected bytes, not whichever timestamp wins. -->
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="$(RepositoryRoot)target\$(RustProfile)\seiza_platform.dll" Condition="Exists('$(RepositoryRoot)target\$(RustProfile)\seiza_platform.dll')">
+      <Link>seiza_platform.dll</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
@@ -53,6 +57,8 @@
     <Compile Include="..\..\src\Seiza.App\Models\StackAlignmentReference.cs" Link="Models\StackAlignmentReference.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\StackingCoreCapabilities.cs" Link="Services\StackingCoreCapabilities.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\StackReferenceService.cs" Link="Services\StackReferenceService.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\StackDefectService.cs" Link="Services\StackDefectService.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\ColorWorkflowService.cs" Link="Services\ColorWorkflowService.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\ImageStackSession.cs" Link="Models\ImageStackSession.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\ImageMetadata.cs" Link="Models\ImageMetadata.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\CatalogStatus.cs" Link="Models\CatalogStatus.cs" />

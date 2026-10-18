@@ -22,6 +22,7 @@ internal static unsafe class SeizaCore
         uint maxDimension = 0,
         FitsImageProcessingConfiguration? processing = null)
     {
+        processing = ColorWorkflowService.ProcessingFor(path, processing ?? FitsImageProcessingConfiguration.Default);
         nint error = 0;
         nint rawHandle = IsAstronomyImage(path)
             ? NativeMethods.OpenRenderedImageWithStretchConfiguration(
@@ -79,6 +80,7 @@ internal static unsafe class SeizaCore
         string path,
         FitsImageProcessingConfiguration? processing = null)
     {
+        processing = ColorWorkflowService.ProcessingFor(path, processing ?? FitsImageProcessingConfiguration.Default);
         nint error = 0;
         nint rawHandle = NativeMethods.OpenRenderedImage16WithStretchConfiguration(
             path,

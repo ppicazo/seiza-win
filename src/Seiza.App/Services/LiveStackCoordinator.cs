@@ -1027,6 +1027,35 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
             foreach (string warning in _preparedCalibration.Warnings) AddAttention(warning);
         }
 
+        if (_configuration.Options.LearnDefects && _configuration.Options.LearnedDefects is null)
+        {
+            var candidates = await new LiveStackReferenceCandidates(_monitorOptions)
+                .ObserveStableExistingAsync(_timeProvider, cancellationToken).ConfigureAwait(false);
+            var compatible = new List<StackFileReadyCandidate>();
+            foreach (var candidate in candidates)
+            {
+                try
+                {
+                    var other = await CalibrationService.ProbeAsync(candidate.Path, cancellationToken).ConfigureAwait(false);
+                    if (CalibrationLightEligibility.IsEligible(other) && LiveStackFilterIdentity.FromProbe(probe).Matches(LiveStackFilterIdentity.FromProbe(other)) &&
+                        LiveStackCalibrationIdentity.Matches(probe.Signature, other.Signature, out _) && LiveStackReferenceCandidates.IsUnchanged(candidate))
+                        compatible.Add(candidate);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception error) { AddAttention($"Defect learning skipped an unreadable light: {error.Message}", candidate.Path); }
+            }
+            if (compatible.Count < 3)
+            {
+                SetState(LiveStackRunState.WaitingForLight, "Waiting for at least three dithered lights in this filter to learn sensor defects.");
+                return false;
+            }
+            var learned = await StackDefectService.PrepareAsync(compatible.Select(item => item.Path).ToArray(),
+                _configuration.Options, _calibration, cancellationToken).ConfigureAwait(false);
+            if (compatible.Any(item => !LiveStackReferenceCandidates.IsUnchanged(item))) return false;
+            _configuration.Options.LearnedDefects = learned.LearnedDefects;
+            AddAttention("Learned a sensor defect map from dithered lights; it remains fixed for this stack and is retained in its native checkpoint.");
+        }
+
         var file = new FileInfo(fullPath);
         file.Refresh();
         if (!file.Exists)
@@ -1613,6 +1642,11 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         {
             if (!await OpenInitialReferenceAsync(candidate.Path, cancellationToken, [candidate]).ConfigureAwait(false))
             {
+                if (_configuration.Options.LearnDefects && _configuration.Options.LearnedDefects is null)
+                {
+                    _monitor.ReportProcessingResult(candidate, new StackFileProcessingResult(StackFileProcessingDisposition.RetryableFailure, "Waiting for dithered learning frames"));
+                    return;
+                }
                 CompleteReadFailure(candidate, "The first light changed while it was being opened.");
                 return;
             }
@@ -1799,6 +1833,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                 IncludesSubdirectories = _configuration.IncludeSubdirectories,
                 OutputPath = _outputPath,
                 StackOptionsJson = _optionsJson,
+                LearnDefects = _configuration.Options.LearnDefects,
                 CreatedAtUtc = _createdAtUtc,
                 UpdatedAtUtc = now,
                 CalibrationHistory = [.. _calibrationHistory],
@@ -1991,6 +2026,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         string.Equals(state.GroupId, _configuration.GroupId, StringComparison.Ordinal) &&
         PathsEqual(state.WatchFolder, _configuration.WatchFolder) &&
         state.IncludesSubdirectories == _configuration.IncludeSubdirectories &&
+        state.LearnDefects == _configuration.Options.LearnDefects &&
         string.Equals(state.StackOptionsJson, _optionsJson, StringComparison.Ordinal);
 
     private void MarkCheckpointDirtyLocked()
@@ -2256,6 +2292,11 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
 
     private void ValidateAlignmentCalibration(ImageStackCalibration calibration)
     {
+        if (_configuration.Options.LearnDefects && (calibration.DarkPath is not null ||
+            (_session is not null && !LiveStackCalibrationSelection.AreEquivalent(_calibration, calibration))))
+        {
+            throw new InvalidOperationException("A learned defect map requires fixed calibration without a master dark. Start a new stack to change its calibration.");
+        }
         if (_alignmentReferencePath is not null &&
             new[] { calibration.BiasPath, calibration.DarkPath, calibration.FlatPath }
                 .Any(path => LiveStackPath.Equals(path, _alignmentReferencePath)))

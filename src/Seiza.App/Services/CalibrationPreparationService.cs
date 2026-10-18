@@ -1734,8 +1734,10 @@ internal sealed class CalibrationPreparationService
 
     private static string ReadCoreVersion()
     {
-        nint value = NativeMethods.GetCoreVersion();
-        return Marshal.PtrToStringUTF8(value) ?? "unknown";
+        // The persisted CoreVersion field is now a namespaced output version.
+        // Non-imaging release changes no longer invalidate master caches.
+        nint value = NativeMethods.GetStackingOutputVersion();
+        return "stacking-output:" + (Marshal.PtrToStringUTF8(value) ?? "unknown");
     }
 
     private static void ValidateRequest(CalibrationPreparationRequest request)

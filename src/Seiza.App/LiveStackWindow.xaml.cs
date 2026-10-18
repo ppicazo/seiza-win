@@ -15,6 +15,8 @@ namespace Seiza.App;
 
 public sealed partial class LiveStackWindow : Window, IDisposable
 {
+    private void ColorStack_Click(object sender, RoutedEventArgs e) => App.ShowColorStack();
+
     private readonly TaskCompletionSource<string?> _completion = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ImageStackCalibration _manualCalibration = new();
@@ -351,6 +353,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
             ? StackCfaIntegration.BayerDrizzle
             : StackCfaIntegration.Demosaic,
         SuppressHotPixels = SuppressHotPixelsToggle.IsOn,
+        LearnDefects = LearnDefectsToggle.IsOn,
         CosmeticLowSigma = FiniteValue(CosmeticLowSigmaBox, 16),
         CosmeticHighSigma = FiniteValue(CosmeticHighSigmaBox, 16),
         Rejection = SelectedTag(RejectionPicker) == "None"
