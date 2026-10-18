@@ -20,6 +20,9 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
     private readonly Func<IReadOnlyList<string>, CancellationToken, Task<StackReferenceSelection>> _referenceSelector;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly SemaphoreSlim _operationGate = new(1, 1);
+    private readonly SemaphoreSlim? _processingSlots;
+    private readonly Func<CalibrationFrameProbe, CancellationToken, Task<CalibrationPreparationResult>>? _prepareCalibration;
+    private CalibrationPreparationResult? _preparedCalibration;
     private readonly object _stateSync = new();
     private readonly List<LiveStackPersistedFrame> _frames = [];
     private readonly List<LiveStackPersistedSnrSample> _snrSamples = [];
@@ -62,10 +65,14 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
     public LiveStackCoordinator(
         LiveStackRunConfiguration configuration,
         TimeProvider? timeProvider = null,
-        Func<IReadOnlyList<string>, CancellationToken, Task<StackReferenceSelection>>? referenceSelector = null)
+        Func<IReadOnlyList<string>, CancellationToken, Task<StackReferenceSelection>>? referenceSelector = null,
+        SemaphoreSlim? processingSlots = null,
+        Func<CalibrationFrameProbe, CancellationToken, Task<CalibrationPreparationResult>>? prepareCalibration = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         configuration.Validate();
+        _processingSlots = processingSlots;
+        _prepareCalibration = prepareCalibration;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _createdAtUtc = _timeProvider.GetUtcNow();
         _configuration = SnapshotConfiguration(configuration);
@@ -747,6 +754,8 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                     _session = null;
                 }
                 _disposed = true;
+                _preparedCalibration?.Dispose();
+                _preparedCalibration = null;
             }
             finally
             {
@@ -912,6 +921,10 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                     {
                         continue;
                     }
+                    if (_configuration.TargetFilter is { } target && !target.Matches(LiveStackFilterIdentity.FromProbe(probe)))
+                    {
+                        continue;
+                    }
                     if (firstProbe is not null &&
                         (!LiveStackFilterIdentity.FromProbe(firstProbe).Matches(LiveStackFilterIdentity.FromProbe(probe)) ||
                          !LiveStackCalibrationIdentity.Matches(firstProbe.Signature, probe.Signature, out _)))
@@ -983,6 +996,10 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         CalibrationFrameProbe probe = await CalibrationService
             .ProbeAsync(fullPath, cancellationToken)
             .ConfigureAwait(false);
+        if (_configuration.TargetFilter is { } target && !target.Matches(LiveStackFilterIdentity.FromProbe(probe)))
+        {
+            throw new InvalidDataException("The reference does not belong to this filter's stack.");
+        }
         if (expectedCandidate is not null && !LiveStackReferenceCandidates.IsUnchanged(expectedCandidate))
         {
             return false;
@@ -1000,6 +1017,14 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         {
             throw new InvalidDataException(
                 $"The selected reference cannot receive calibration because {reason}.");
+        }
+
+        if (_prepareCalibration is not null && _preparedCalibration is null)
+        {
+            _preparedCalibration = await _prepareCalibration(probe, cancellationToken).ConfigureAwait(false);
+            _calibration = CloneCalibration(_preparedCalibration.Calibration);
+            SeedCalibrationPaths(_calibration);
+            foreach (string warning in _preparedCalibration.Warnings) AddAttention(warning);
         }
 
         var file = new FileInfo(fullPath);
@@ -1395,6 +1420,21 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         StackFileReadyCandidate candidate,
         CancellationToken cancellationToken)
     {
+        if (_processingSlots is not null) await _processingSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await ProcessCandidateCoreAsync(candidate, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _processingSlots?.Release();
+        }
+    }
+
+    private async Task ProcessCandidateCoreAsync(
+        StackFileReadyCandidate candidate,
+        CancellationToken cancellationToken)
+    {
         if (!_monitor.IsCandidateCurrent(candidate))
         {
             return;
@@ -1413,6 +1453,16 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         catch (Exception exception)
         {
             CompleteReadFailure(candidate, exception.Message);
+            return;
+        }
+
+        if (_configuration.TargetFilter is { } target && !target.Matches(LiveStackFilterIdentity.FromProbe(probe)))
+        {
+            // Another session group owns this light. Do not count it as an
+            // ignored capture or pollute this group's persisted source ledger.
+            _monitor.ReportProcessingResult(candidate, new StackFileProcessingResult(
+                StackFileProcessingDisposition.Ignored, "Owned by another filter group"));
+            SetWatchingState($"Watching for {target.DisplayName} lights.");
             return;
         }
 
@@ -1937,6 +1987,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
     }
 
     private bool ManifestMatchesConfiguration(LiveStackPersistedState state) =>
+        (_configuration.TargetFilter is null || _configuration.TargetFilter.Matches(LiveStackFilterIdentity.FromStoredName(state.FilterName))) &&
         string.Equals(state.GroupId, _configuration.GroupId, StringComparison.Ordinal) &&
         PathsEqual(state.WatchFolder, _configuration.WatchFolder) &&
         state.IncludesSubdirectories == _configuration.IncludeSubdirectories &&

@@ -81,7 +81,8 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         "The original astronomy file's headers are tried before solving the private stars/snapshot.");
     public string? PreparationIssue => !SourceReady ? "Wait for the source snapshot to finish loading." :
         _catalogs.IsRunning ? "Wait for catalogue setup to finish." :
-        AutomaticSeparation ? (!_inputs.ContainsKey(ParallaxInputFile.Separator) ? "Choose the StarXTerminator executable in Source." : ValidationMessage ?? TourSolveIssue) :
+        AutomaticSeparation ? (!_inputs.TryGetValue(ParallaxInputFile.Separator, out string? executable) || !File.Exists(executable)
+            ? "Choose an existing RC-Astro executable in Settings." : ValidationMessage ?? TourSolveIssue) :
         _starless is null || _stars is null ? "Choose both Starless and Stars images in Source." :
         !LayersAligned ? "Enable Layers match source alignment and stretch in Source to prepare the selected pair." : ValidationMessage;
     public bool AutomaticSeparation { get => _automaticSeparation; set { if (_automaticSeparation == value) return; _automaticSeparation = value; Invalidate(true); } }
@@ -115,8 +116,31 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         SolveInformation = _lastDocumentSolve = readDocumentSolve?.Invoke();
         _protectedInputHistory.Remember([sourcePath]);
         CatalogSettingsStore.CatalogDirectoryChanged += CatalogDirectoryChanged;
+        CatalogSettingsStore.RcAstroExecutableChanged += RcAstroExecutableChanged;
+        LoadRcAstroExecutable();
         _catalogs.PropertyChanged += CatalogChanged;
     }
+
+    private void LoadRcAstroExecutable()
+    {
+        if (CatalogSettingsStore.LoadRcAstroExecutable() is string path)
+        {
+            _inputs[ParallaxInputFile.Separator] = path;
+            _protectedInputHistory.Remember([path]);
+        }
+        else
+        {
+            _inputs.Remove(ParallaxInputFile.Separator);
+        }
+    }
+
+    private void RcAstroExecutableChanged(object? sender, EventArgs e) => _dispatcher.TryEnqueue(() =>
+    {
+        if (_closed) return;
+        LoadRcAstroExecutable();
+        Invalidate(true);
+        Notify();
+    });
 
     public async Task InitializeAsync()
     {
@@ -818,7 +842,9 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     {
         if (_closed) return;
         _closed = true; Cancel(); StopPlayback(); _frameRevision++; _pendingFrame = null;
-        CatalogSettingsStore.CatalogDirectoryChanged -= CatalogDirectoryChanged; _catalogs.PropertyChanged -= CatalogChanged;
+        CatalogSettingsStore.CatalogDirectoryChanged -= CatalogDirectoryChanged;
+        CatalogSettingsStore.RcAstroExecutableChanged -= RcAstroExecutableChanged;
+        _catalogs.PropertyChanged -= CatalogChanged;
         ReleasePreview(); _scene?.Dispose(); _scene = null; SourceImage = PreviewImage = null;
         TryCleanup();
     }

@@ -19,7 +19,8 @@ Windows image codecs to make a lossless 16-bit PNG snapshot, normalizing EXIF
 orientation without passing through the viewer's eight-bit display bitmap.
 
 1. In **Source**, configure star separation and scene depth. Use a locally
-   installed RC-Astro CLI (`rc-astro.exe`) licensed for StarXTerminator, or
+   installed RC-Astro CLI (`rc-astro.exe`) licensed for StarXTerminator, selected
+   once in **Settings > External tools** and remembered across launches, or
    choose aligned starless/stars layers. Manual layers must have the source
    dimensions, matching orientation and stretch; confirm their alignment
    before preparation. Alignment defaults on and importing/replacing layers
@@ -107,7 +108,7 @@ magnifying the whole tour. Windows regression coverage verifies unchanged
 opening pixels and global zoom after pulling back an off-centre target, with
 glide 0 and 0.2. Show Whole Image remains a separate, explicit framing choice,
 not the fix for the Fill Frame coupling. Windows uses published Seiza/C ABI
-**0.33.0**, containing both #283 and #277's source-space cropped-dust correction.
+**0.38.0**, including both #283 and #277's source-space cropped-dust correction.
 For two-stop turns, fitting can add temporary magnification between the stops
 while preserving their endpoint lenses. The preview inspector reports this as
 **Transition zoom**. Endpoint spins are fitted throughout their holds.

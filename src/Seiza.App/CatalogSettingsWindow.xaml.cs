@@ -26,6 +26,7 @@ public sealed partial class CatalogSettingsWindow : Window
         Closed += CatalogSettingsWindow_Closed;
         AutomaticUpdateChecksToggle.IsOn =
             CatalogSettingsStore.LoadAutomaticallyCheckForUpdates();
+        RefreshRcAstroPath();
         UpdateVisualState();
     }
 
@@ -39,6 +40,49 @@ public sealed partial class CatalogSettingsWindow : Window
         _loaded = true;
         SizeAndCenterWindow();
         await ViewModel.RefreshAsync();
+    }
+
+    private void RefreshRcAstroPath()
+    {
+        string? path = CatalogSettingsStore.LoadRcAstroExecutable();
+        RcAstroPathText.Text = path is null ? "Not configured" :
+            File.Exists(path) ? path : $"{path} (not found; choose its new location)";
+    }
+
+    private async void ChooseRcAstro_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FileOpenPicker();
+            picker.FileTypeFilter.Add(".exe");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            if (await picker.PickSingleFileAsync() is { } file)
+            {
+                CatalogSettingsStore.SaveRcAstroExecutable(file.Path);
+                RefreshRcAstroPath();
+                RcAstroErrorBar.IsOpen = false;
+            }
+        }
+        catch (Exception error)
+        {
+            RcAstroErrorBar.Message = error.Message;
+            RcAstroErrorBar.IsOpen = true;
+        }
+    }
+
+    private void ClearRcAstro_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            CatalogSettingsStore.SaveRcAstroExecutable(null);
+            RefreshRcAstroPath();
+            RcAstroErrorBar.IsOpen = false;
+        }
+        catch (Exception error)
+        {
+            RcAstroErrorBar.Message = error.Message;
+            RcAstroErrorBar.IsOpen = true;
+        }
     }
 
     private async void ChooseFolder_Click(object sender, RoutedEventArgs e)

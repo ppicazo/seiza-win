@@ -12,6 +12,8 @@ internal enum FitsStretchType
     Mtf,
     Ghs,
     Identity,
+    MedianAnchor,
+    Layered,
 }
 
 internal static class FitsStretchTypeExtensions
@@ -25,6 +27,8 @@ internal static class FitsStretchTypeExtensions
         FitsStretchType.Mtf => "Midtones Transfer",
         FitsStretchType.Ghs => "Generalized Hyperbolic",
         FitsStretchType.Identity => "No Stretch",
+        FitsStretchType.MedianAnchor => "Median Anchor",
+        FitsStretchType.Layered => "Layered",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 
@@ -32,6 +36,10 @@ internal static class FitsStretchTypeExtensions
     {
         FitsStretchType.AutoMtf =>
             "Choose an MTF curve from the image median and median absolute deviation.",
+        FitsStretchType.MedianAnchor =>
+            "Anchor the background median with optional quarter-tone lift and highlight compression.",
+        FitsStretchType.Layered =>
+            "Stretch luminance at separate scales, recovering structure and controlling star cores and color.",
         FitsStretchType.PercentileAsinh =>
             "Choose black and white points from image percentiles, then apply an asinh curve.",
         FitsStretchType.Linear =>
@@ -56,6 +64,8 @@ internal static class FitsStretchTypeExtensions
         FitsStretchType.Mtf => "mtf",
         FitsStretchType.Ghs => "ghs",
         FitsStretchType.Identity => "identity",
+        FitsStretchType.MedianAnchor => "median-anchor",
+        FitsStretchType.Layered => "layered",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 }
@@ -167,6 +177,20 @@ internal sealed class FitsStretchConfiguration : IEquatable<FitsStretchConfigura
     public double TargetMedian { get; set; } = 0.2;
     public double ShadowsClip { get; set; } = -2.8;
 
+    public double? BlackPointSigma { get; set; } = 2.7;
+    public double CurvesBoost { get; set; }
+    public double HdrAmount { get; set; }
+    public double HdrKnee { get; set; } = 0.75;
+    public bool Normalize { get; set; }
+    public double TargetBackground { get; set; } = 0.15;
+    public double Aggressiveness { get; set; } = 0.5;
+    public double DynamicRangeCompression { get; set; }
+    public int ScaleSeparation { get; set; } = 256;
+    public double ContrastRecovery { get; set; }
+    public double SaturationAmount { get; set; }
+    public double SaturationBoost { get; set; } = 0.5;
+    public bool LightnessMask { get; set; } = true;
+
     public double BlackPercentile { get; set; } = 0.01;
     public double WhitePercentile { get; set; } = 0.995;
     public double Strength { get; set; } = 10.0;
@@ -201,6 +225,9 @@ internal sealed class FitsStretchConfiguration : IEquatable<FitsStretchConfigura
                 Strength, Black, White, Shadows, Midtone, Highlights,
                 StretchFactor, LocalIntensity, SymmetryPoint, ProtectShadows,
                 ProtectHighlights,
+                BlackPointSigma ?? 1, CurvesBoost, HdrAmount, HdrKnee,
+                TargetBackground, Aggressiveness, DynamicRangeCompression,
+                ContrastRecovery, SaturationAmount, SaturationBoost,
             ];
             if (finiteValues.Any(value => !double.IsFinite(value)))
             {
@@ -213,6 +240,17 @@ internal sealed class FitsStretchConfiguration : IEquatable<FitsStretchConfigura
 
             return Type switch
             {
+                FitsStretchType.MedianAnchor when TargetMedian is <= 0 or >= 1 ||
+                    BlackPointSigma is <= 0 || CurvesBoost is < 0 or > 0.9 ||
+                    HdrAmount is < 0 or > 1 || HdrKnee is <= 0 or >= 1 =>
+                    "Median Anchor needs a target and HDR knee between 0 and 1, positive black-point sigma, curves boost 0–0.9 and HDR amount 0–1.",
+                FitsStretchType.Layered when ColorStrategy == FitsStretchColorStrategy.Unlinked =>
+                    "Layered uses luminance; choose linked channels or preserve luminance color.",
+                FitsStretchType.Layered when TargetBackground is <= 0 or >= 1 ||
+                    Aggressiveness is < 0 or > 1 || DynamicRangeCompression is < 0 or > 1 ||
+                    ScaleSeparation is < 8 or > 1024 || ContrastRecovery is < 0 or > 1 ||
+                    SaturationAmount is < 0 or > 1 || SaturationBoost is < 0 or > 1 =>
+                    "Layered needs a target background between 0 and 1, scale 8–1024 pixels, and other amounts between 0 and 1.",
                 FitsStretchType.AutoMtf when TargetMedian is <= 0 or >= 1 =>
                     "Target median must be between 0 and 1.",
                 FitsStretchType.AutoMtf when ShadowsClip > 0 =>
@@ -254,6 +292,19 @@ internal sealed class FitsStretchConfiguration : IEquatable<FitsStretchConfigura
         MaxAnalysisSamples == other.MaxAnalysisSamples &&
         TargetMedian == other.TargetMedian &&
         ShadowsClip == other.ShadowsClip &&
+        BlackPointSigma == other.BlackPointSigma &&
+        CurvesBoost == other.CurvesBoost &&
+        HdrAmount == other.HdrAmount &&
+        HdrKnee == other.HdrKnee &&
+        Normalize == other.Normalize &&
+        TargetBackground == other.TargetBackground &&
+        Aggressiveness == other.Aggressiveness &&
+        DynamicRangeCompression == other.DynamicRangeCompression &&
+        ScaleSeparation == other.ScaleSeparation &&
+        ContrastRecovery == other.ContrastRecovery &&
+        SaturationAmount == other.SaturationAmount &&
+        SaturationBoost == other.SaturationBoost &&
+        LightnessMask == other.LightnessMask &&
         BlackPercentile == other.BlackPercentile &&
         WhitePercentile == other.WhitePercentile &&
         Strength == other.Strength &&
@@ -472,10 +523,23 @@ internal sealed class FitsImageProcessingConfiguration : IEquatable<FitsImagePro
                 Type = ParseStretchType(typeElement.GetString()),
                 ColorStrategy = stageElement.TryGetProperty("color_strategy", out JsonElement color)
                     ? ParseColorStrategy(color.GetString())
-                    : FitsStretchColorStrategy.Unlinked,
+                    : typeElement.GetString() == "layered" ? FitsStretchColorStrategy.LuminancePreserving : FitsStretchColorStrategy.Unlinked,
                 MaxAnalysisSamples = ReadInt(stageElement, "max_analysis_samples", 200_000),
-                TargetMedian = ReadDouble(model, "target_median", 0.2),
+                TargetMedian = ReadDouble(model, "target_median", typeElement.GetString() == "median-anchor" ? 0.25 : 0.2),
                 ShadowsClip = ReadDouble(model, "shadows_clip", -2.8),
+                BlackPointSigma = model.TryGetProperty("black_point_sigma", out JsonElement sigma) ? sigma.ValueKind == JsonValueKind.Null ? null : sigma.GetDouble() : 2.7,
+                CurvesBoost = ReadDouble(model, "curves_boost", 0),
+                HdrAmount = ReadDouble(model, "hdr_amount", 0),
+                HdrKnee = ReadDouble(model, "hdr_knee", 0.75),
+                Normalize = model.TryGetProperty("normalize", out JsonElement normalize) ? normalize.GetBoolean() : false,
+                TargetBackground = ReadDouble(model, "target_background", 0.15),
+                Aggressiveness = ReadDouble(model, "aggressiveness", 0.5),
+                DynamicRangeCompression = ReadDouble(model, "dynamic_range_compression", 0),
+                ScaleSeparation = ReadInt(model, "scale_separation", 256),
+                ContrastRecovery = ReadDouble(model, "contrast_recovery", 0),
+                SaturationAmount = ReadDouble(model, "saturation_amount", 0),
+                SaturationBoost = ReadDouble(model, "saturation_boost", 0.5),
+                LightnessMask = model.TryGetProperty("lightness_mask", out JsonElement lightnessmask) ? lightnessmask.GetBoolean() : true,
                 BlackPercentile = ReadDouble(model, "black_percentile", 0.01),
                 WhitePercentile = ReadDouble(model, "white_percentile", 0.995),
                 Strength = ReadDouble(model, "strength", 10.0),
@@ -543,6 +607,8 @@ internal sealed class FitsImageProcessingConfiguration : IEquatable<FitsImagePro
         "mtf" => FitsStretchType.Mtf,
         "ghs" => FitsStretchType.Ghs,
         "identity" => FitsStretchType.Identity,
+        "median-anchor" => FitsStretchType.MedianAnchor,
+        "layered" => FitsStretchType.Layered,
         _ => throw new FormatException($"Unknown stretch type '{value}'."),
     };
 
@@ -568,6 +634,25 @@ internal sealed class FitsImageProcessingConfiguration : IEquatable<FitsImagePro
         writer.WriteString("type", stage.Type.JsonName());
         switch (stage.Type)
         {
+            case FitsStretchType.MedianAnchor:
+                writer.WriteNumber("target_median", stage.TargetMedian);
+                if (stage.BlackPointSigma is double sigma) writer.WriteNumber("black_point_sigma", sigma);
+                else writer.WriteNull("black_point_sigma");
+                writer.WriteNumber("curves_boost", stage.CurvesBoost);
+                writer.WriteNumber("hdr_amount", stage.HdrAmount);
+                writer.WriteNumber("hdr_knee", stage.HdrKnee);
+                writer.WriteBoolean("normalize", stage.Normalize);
+                break;
+            case FitsStretchType.Layered:
+                writer.WriteNumber("target_background", stage.TargetBackground);
+                writer.WriteNumber("aggressiveness", stage.Aggressiveness);
+                writer.WriteNumber("dynamic_range_compression", stage.DynamicRangeCompression);
+                writer.WriteNumber("scale_separation", stage.ScaleSeparation);
+                writer.WriteNumber("contrast_recovery", stage.ContrastRecovery);
+                writer.WriteNumber("saturation_amount", stage.SaturationAmount);
+                writer.WriteNumber("saturation_boost", stage.SaturationBoost);
+                writer.WriteBoolean("lightness_mask", stage.LightnessMask);
+                break;
             case FitsStretchType.AutoMtf:
                 writer.WriteNumber("target_median", stage.TargetMedian);
                 writer.WriteNumber("shadows_clip", stage.ShadowsClip);

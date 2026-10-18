@@ -432,7 +432,9 @@ public sealed partial class ParallaxWindow : Window, IDisposable
         Toggle(separation, "Use StarXTerminator", () => Session.AutomaticSeparation, value => Session.AutomaticSeparation = value);
         var automatic = new StackPanel { Spacing = 8 };
         separation.Children.Add(automatic);
-        InputPicker(automatic, ParallaxInputFile.Separator, "RC-Astro CLI (rc-astro.exe)");
+        Note(automatic, CatalogSettingsStore.LoadRcAstroExecutable() is string executable
+            ? $"RC-Astro: {executable}" : "Choose rc-astro.exe once in Settings; it is shared by all Parallax windows.");
+        Button(automatic, "RC-Astro Settings…", () => OpenCatalogSettingsRequested?.Invoke(this, EventArgs.Empty));
         Note(automatic, "Requires a local RC-Astro CLI with a valid StarXTerminator license.");
         var manual = new StackPanel { Spacing = 8 };
         separation.Children.Add(manual);
