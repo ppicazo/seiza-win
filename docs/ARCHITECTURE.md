@@ -162,9 +162,19 @@ Windows CI.
     encoding through MediaStreamSource/MediaTranscoder; no pixel math is ported
     to C#. The separate `seiza-platform` DLL adapts only focused catalog
     status/setup through the published Rust download APIs, not a fork of the
-    shared C ABI. Core/C ABI 0.33.0 and parallax 0.10.0 come from published
+    shared C ABI. Core/C ABI 0.38.0 and parallax 0.15.0 come from published
     crates, with the upstream font notice included in the app. See
     [Parallax video](PARALLAX-VIDEO.md).
+19. Multi-filter live sessions own one existing live coordinator/native handle
+    per canonical filter identity. Windows routes discovery and selects UI
+    previews; Rust still performs all calibration, registration and accumulation.
+    Startup/ingestion shares a two-operation semaphore; per-handle serialization
+    remains mandatory. An exclusively leased, atomic filter registry restores
+    groups even when captures have moved and records completed filters. Each
+    group retains its own native checkpoint and source ledger; closing saves all
+    groups, not just the selected one. A failed filter does not stop discovery
+    or ingestion in the others. RC-Astro's executable path is a persistent user
+    setting, observed by each open Parallax session.
 
 ## Performance rules
 

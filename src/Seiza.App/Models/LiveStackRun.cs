@@ -165,9 +165,24 @@ internal sealed record LiveStackRunConfiguration
         "\"max_analysis_samples\":200000}]}";
 
     public string WatchFolder { get; init; } = string.Empty;
+    public static string PreviewProcessingJsonFor(FitsStretchType type)
+    {
+        var stage = new FitsStretchConfiguration
+        {
+            Type = type,
+            TargetMedian = type == FitsStretchType.MedianAnchor ? 0.25 : 0.2,
+            ColorStrategy = type == FitsStretchType.Layered
+                ? FitsStretchColorStrategy.LuminancePreserving : FitsStretchColorStrategy.Unlinked,
+        };
+        var processing = new FitsImageProcessingConfiguration(new FitsStretchStack([stage]), null);
+        var root = System.Text.Json.Nodes.JsonNode.Parse(DefaultPreviewProcessingJson)!;
+        root["stretch"] = System.Text.Json.Nodes.JsonNode.Parse(processing.ToJson())!["stretch"]!.DeepClone();
+        return root.ToJsonString();
+    }
     public string SessionRootDirectory { get; init; } = string.Empty;
     public string GroupId { get; init; } = "live";
     public string GroupTitle { get; init; } = "Live stack";
+    public LiveStackFilterIdentity? TargetFilter { get; init; }
     public bool IncludeSubdirectories { get; init; }
     public bool ResumeExisting { get; init; } = true;
     public bool ChooseReferenceAutomatically { get; init; }

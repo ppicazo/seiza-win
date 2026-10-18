@@ -26,6 +26,10 @@ public sealed partial class LiveStackWindow : Window, IDisposable
     private CancellationTokenSource? _preparationCancellation;
     private TaskCompletionSource<bool>? _preparationCompletion;
     private LiveStackCoordinator? _coordinator;
+    private LiveStackSessionCoordinator? _session;
+    private bool _updatingGroups;
+    private LiveStackFilterGroup[] _displayedGroups = [];
+    private int _groupRefreshQueued;
     private Task? _runTask;
     private CanvasBitmap? _previewBitmap;
     private RenderedImageData? _displayedPreview;
@@ -464,7 +468,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         CalibrationPreparationResult? pendingCalibration = null;
         try
         {
-            if (calibrationMode == "Automatic")
+            if (calibrationMode == "Automatic" && !SeparateFiltersToggle.IsOn)
             {
                 (CalibrationPreparationResult prepared, string referencePath) =
                     await PrepareAutomaticCalibrationAsync(preparationCancellation.Token);
@@ -501,6 +505,8 @@ public sealed partial class LiveStackWindow : Window, IDisposable
                 AlignmentReferencePath = AlignmentReferencePath,
                 Options = options,
                 Calibration = calibration,
+                PreviewProcessingJson = LiveStackRunConfiguration.PreviewProcessingJsonFor(
+                    Enum.Parse<FitsStretchType>(SelectedTag(LiveStretchPicker))),
             };
 
             await ReplaceCoordinatorAsync(configuration);
@@ -702,6 +708,31 @@ public sealed partial class LiveStackWindow : Window, IDisposable
     private async Task ReplaceCoordinatorAsync(LiveStackRunConfiguration configuration)
     {
         await StopCoordinatorAsync(save: false);
+        if (SeparateFiltersToggle.IsOn)
+        {
+            string library = CalibrationFolderTextBox.Text;
+            string? alignment = configuration.AlignmentReferencePath;
+            Func<CalibrationFrameProbe, CancellationToken, Task<CalibrationPreparationResult>>? prepare =
+                SelectedTag(CalibrationModePicker) == "Automatic"
+                ? (reference, token) => new CalibrationPreparationService().PrepareAsync(new CalibrationPreparationRequest
+                {
+                    Reference = reference,
+                    SourcePaths = [Path.GetFullPath(library)],
+                    CacheDirectory = CalibrationCachePaths.ForLibrary(library),
+                    ProtectedMasterPaths = alignment is null ? [] : [alignment],
+                }, null, token)
+                : null;
+            var session = new LiveStackSessionCoordinator(configuration with
+            {
+                SessionRootDirectory = Path.Combine(configuration.SessionRootDirectory, "multi-filter"),
+            }, prepare);
+            _session = session;
+            session.Changed += Session_Changed;
+            SessionGroupsPanel.Visibility = Visibility.Visible;
+            await session.StartAsync(_preparationCancellation?.Token ?? CancellationToken.None);
+            RefreshSessionGroups();
+            return;
+        }
         var coordinator = new LiveStackCoordinator(configuration);
         coordinator.Changed += Coordinator_Changed;
         _coordinator = coordinator;
@@ -709,6 +740,71 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         _runCancellation = cancellation;
         _runTask = ObserveRunAsync(coordinator, cancellation.Token);
         await Task.Yield();
+    }
+
+    private void Session_Changed(object? sender, EventArgs e)
+    {
+        if (Interlocked.Exchange(ref _groupRefreshQueued, 1) != 0) return;
+        if (!DispatcherQueue.TryEnqueue(() =>
+        {
+            Interlocked.Exchange(ref _groupRefreshQueued, 0);
+            if (!_closed) RefreshSessionGroups();
+        })) Interlocked.Exchange(ref _groupRefreshQueued, 0);
+    }
+
+    private void RefreshSessionGroups()
+    {
+        if (_session is null) return;
+        _updatingGroups = true;
+        try
+        {
+            LiveStackFilterGroup[] groups = _session.Groups.ToArray();
+            _displayedGroups = groups;
+            LiveStackFilterGroup? selected = groups.FirstOrDefault(group => ReferenceEquals(group.Coordinator, _coordinator)) ?? groups.FirstOrDefault();
+            FilterGroupPicker.ItemsSource = groups.Select(group => group.ToString()).ToArray();
+            FilterGroupPicker.SelectedIndex = selected is null ? -1 : Array.IndexOf(groups, selected);
+            SelectGroup(selected);
+            SessionStatusText.Text = _session.Status;
+            FilterGroupPicker.IsEnabled = !_busy;
+            PauseButton.Content = _session.IsPaused ? "Resume all filters" : "Pause and save all";
+            PauseButton.IsEnabled = !_busy;
+        }
+        finally { _updatingGroups = false; }
+    }
+
+    private void FilterGroup_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingGroups || _session is null) return;
+        SelectGroup(_displayedGroups.ElementAtOrDefault(FilterGroupPicker.SelectedIndex));
+        RefreshSessionGroups();
+    }
+
+    private void SelectGroup(LiveStackFilterGroup? group)
+    {
+        if (!ReferenceEquals(_coordinator, group?.Coordinator))
+        {
+            _runOperationError = null;
+            _previewBitmap?.Dispose();
+            _previewBitmap = null;
+            _displayedPreview = null;
+            EmptyPreviewPanel.Visibility = Visibility.Visible;
+            PreviewCanvas.Invalidate();
+        }
+        _coordinator = group?.Coordinator;
+        if (_coordinator is not null) ApplySnapshot(_coordinator.CurrentSnapshot);
+        else
+        {
+            RunStateText.Text = "Waiting for lights";
+            RunStatusText.Text = "Filter stacks will appear as complete light frames are discovered.";
+            SnapshotButton.IsEnabled = PrimaryButton.IsEnabled = false;
+        }
+        if (group?.Error is string error) ShowRunError(error);
+        if (group?.Completed == true)
+        {
+            RunStateText.Text = "Completed";
+            RunStatusText.Text = "This filter was finished in a previous run.";
+            SnapshotButton.IsEnabled = PrimaryButton.IsEnabled = false;
+        }
     }
 
     private async Task ObserveRunAsync(
@@ -822,7 +918,15 @@ public sealed partial class LiveStackWindow : Window, IDisposable
             !snapshot.RequiresReopenToResume && !_busy && snapshot.HasStack;
         PrimaryButton.IsEnabled =
             !snapshot.RequiresReopenToResume && !_busy && snapshot.HasStack;
-        PrimaryButton.Content = "Finish and save…";
+        PrimaryButton.Content = _session is null ? "Finish and save…" : "Finish selected filter…";
+        if (_session is not null)
+        {
+            bool completed = snapshot.State == LiveStackRunState.Completed;
+            PrimaryButton.IsEnabled &= !completed;
+            SnapshotButton.IsEnabled &= !completed;
+            PauseButton.Content = _session.IsPaused ? "Resume all filters" : "Pause and save all";
+            PauseButton.IsEnabled = !_busy;
+        }
         WaitingProgressRing.IsActive = snapshot.IsRunning && !snapshot.HasStack;
         if (snapshot.State == LiveStackRunState.Faulted)
         {
@@ -957,7 +1061,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
 
     private async void Pause_Click(object sender, RoutedEventArgs e)
     {
-        if (_busy || _coordinator is null)
+        if (_busy || (_coordinator is null && _session is null))
         {
             return;
         }
@@ -966,7 +1070,13 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         SetBusy(true);
         try
         {
-            if (_coordinator.CurrentSnapshot.State == LiveStackRunState.Paused)
+            if (_session is not null)
+            {
+                if (_session.IsPaused) await _session.StartAsync();
+                else await _session.PauseAndSaveAsync();
+                RefreshSessionGroups();
+            }
+            else if (_coordinator!.CurrentSnapshot.State == LiveStackRunState.Paused)
             {
                 if (_runTask is not null)
                 {
@@ -1014,6 +1124,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         bool wroteOutput = false;
         try
         {
+            _session?.ValidateOutputPath(output.Path);
             LiveStackExportResult result = await _coordinator.SaveSnapshotAsync(output.Path);
             wroteOutput = true;
             PreviewInfoBar.Message =
@@ -1057,8 +1168,18 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         bool wroteOutput = false;
         try
         {
+            _session?.ValidateOutputPath(output.Path);
             LiveStackExportResult result = await _coordinator.FinishAsync(output.Path);
             wroteOutput = true;
+            if (_session is not null)
+            {
+                PreviewInfoBar.Message = $"Saved {Path.GetFileName(result.OutputPath)}. Other filter stacks continue running.";
+                PreviewInfoBar.IsOpen = true;
+                if (result.TransientRemovalNote is not null) await ShowTransientRemovalNoteAsync(result.TransientRemovalNote);
+                SetBusy(false);
+                RefreshSessionGroups();
+                return;
+            }
             await StopCoordinatorAsync(save: false);
             if (result.TransientRemovalNote is not null && !_closed)
             {
@@ -1156,6 +1277,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         {
             ApplySnapshot(_coordinator.CurrentSnapshot);
         }
+        if (_session is not null) RefreshSessionGroups();
     }
 
     private void ShowConfigurationError(
@@ -1210,7 +1332,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
                 await preparationTask;
             }
             bool checkpointBeforeClose =
-                _coordinator?.CurrentSnapshot.RequiresReopenToResume != true;
+                _session is not null || _coordinator?.CurrentSnapshot.RequiresReopenToResume != true;
             await StopCoordinatorAsync(save: checkpointBeforeClose);
         }
         catch (Exception exception)
@@ -1248,6 +1370,15 @@ public sealed partial class LiveStackWindow : Window, IDisposable
 
     private async Task StopCoordinatorAsync(bool save)
     {
+        if (_session is { } session)
+        {
+            if (save) await session.PauseAndSaveAsync();
+            session.Changed -= Session_Changed;
+            await session.DisposeAsync();
+            _session = null;
+            _coordinator = null;
+            return;
+        }
         LiveStackCoordinator? coordinator = _coordinator;
         Task? runTask = _runTask;
         CancellationTokenSource? cancellation = _runCancellation;
@@ -1309,6 +1440,13 @@ public sealed partial class LiveStackWindow : Window, IDisposable
 
     public void Dispose()
     {
+        if (_session is { } session)
+        {
+            session.Changed -= Session_Changed;
+            _session = null;
+            _coordinator = null;
+            _ = DisposeSessionAfterCloseAsync(session);
+        }
         _preparationCancellation?.Cancel();
         _preparationCancellation?.Dispose();
         _preparationCancellation = null;
@@ -1344,6 +1482,12 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         _checkpointAgeTimer.Tick -= CheckpointAgeTimer_Tick;
         PreviewCanvas.RemoveFromVisualTree();
         GC.SuppressFinalize(this);
+    }
+
+    private static async Task DisposeSessionAfterCloseAsync(LiveStackSessionCoordinator session)
+    {
+        try { await session.DisposeAsync(); }
+        catch (Exception error) { System.Diagnostics.Debug.WriteLine(error); }
     }
 
     private void ReplacePreparedCalibration(CalibrationPreparationResult? replacement)

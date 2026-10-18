@@ -5,6 +5,7 @@ namespace Seiza.App.Services;
 internal static class CatalogSettingsStore
 {
     public static event EventHandler? CatalogDirectoryChanged;
+    public static event EventHandler? RcAstroExecutableChanged;
     private static readonly object SyncRoot = new();
     private static readonly string SettingsDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -18,6 +19,28 @@ internal static class CatalogSettingsStore
         {
             return LoadSettings().CatalogDirectory;
         }
+    }
+
+    public static string? LoadRcAstroExecutable()
+    {
+        lock (SyncRoot)
+        {
+            return LoadSettings().RcAstroExecutable;
+        }
+    }
+
+    public static void SaveRcAstroExecutable(string? path)
+    {
+        string? fullPath = string.IsNullOrWhiteSpace(path) ? null : Path.GetFullPath(path);
+        if (fullPath is not null && !File.Exists(fullPath))
+        {
+            throw new FileNotFoundException("The RC-Astro executable was not found.", fullPath);
+        }
+        lock (SyncRoot)
+        {
+            SaveSettings(LoadSettings() with { RcAstroExecutable = fullPath });
+        }
+        RcAstroExecutableChanged?.Invoke(null, EventArgs.Empty);
     }
 
     public static void SaveCatalogDirectory(string? path)
@@ -68,16 +91,17 @@ internal static class CatalogSettingsStore
         }
     }
 
-    private static Settings LoadSettings()
+    internal static Settings LoadSettings(string? path = null)
     {
+        path ??= SettingsPath;
         try
         {
-            if (!File.Exists(SettingsPath))
+            if (!File.Exists(path))
             {
                 return new Settings();
             }
 
-            string json = File.ReadAllText(SettingsPath);
+            string json = File.ReadAllText(path);
             return JsonSerializer.Deserialize<Settings>(json) ?? new Settings();
         }
         catch
@@ -86,16 +110,17 @@ internal static class CatalogSettingsStore
         }
     }
 
-    private static void SaveSettings(Settings settings)
+    internal static void SaveSettings(Settings settings, string? path = null)
     {
-        Directory.CreateDirectory(SettingsDirectory);
+        path ??= SettingsPath;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
-        string temporaryPath = SettingsPath + ".tmp";
+        string temporaryPath = path + ".tmp";
         try
         {
             string json = JsonSerializer.Serialize(settings, SerializerOptions);
             File.WriteAllText(temporaryPath, json);
-            File.Move(temporaryPath, SettingsPath, overwrite: true);
+            File.Move(temporaryPath, path, overwrite: true);
         }
         finally
         {
@@ -103,9 +128,10 @@ internal static class CatalogSettingsStore
         }
     }
 
-    private sealed record Settings
+    internal sealed record Settings
     {
         public string? CatalogDirectory { get; init; }
+        public string? RcAstroExecutable { get; init; }
 
         public bool AutomaticallyCheckForUpdates { get; init; } = true;
 

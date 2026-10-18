@@ -152,6 +152,27 @@ public sealed partial class FitsStretchWindow : Window
         ParameterPanel.Children.Clear();
         switch (Configuration.Type)
         {
+            case FitsStretchType.MedianAnchor:
+                AddParameter("Target median", Configuration.TargetMedian, 0.01, 0.95, 0.01, value => Configuration.TargetMedian = value);
+                AddStretchToggle("Use robust black point", Configuration.BlackPointSigma is not null,
+                    value => Configuration.BlackPointSigma = value ? 2.7 : null, rebuild: true);
+                if (Configuration.BlackPointSigma is double sigma)
+                    AddParameter("Black point (sigma below median)", sigma, 0.1, 20, 0.1, value => Configuration.BlackPointSigma = value);
+                AddParameter("Quarter-tone lift", Configuration.CurvesBoost, 0, 0.9, 0.01, value => Configuration.CurvesBoost = value);
+                AddParameter("Highlight compression", Configuration.HdrAmount, 0, 1, 0.01, value => Configuration.HdrAmount = value);
+                AddParameter("Highlight knee", Configuration.HdrKnee, 0.01, 0.99, 0.01, value => Configuration.HdrKnee = value);
+                AddStretchToggle("Normalize brightest sample", Configuration.Normalize, value => Configuration.Normalize = value);
+                break;
+            case FitsStretchType.Layered:
+                AddParameter("Target background", Configuration.TargetBackground, 0.01, 0.95, 0.01, value => Configuration.TargetBackground = value);
+                AddParameter("Aggressiveness", Configuration.Aggressiveness, 0, 1, 0.01, value => Configuration.Aggressiveness = value);
+                AddParameter("Star-core compression", Configuration.DynamicRangeCompression, 0, 1, 0.01, value => Configuration.DynamicRangeCompression = value);
+                AddParameter("Scale separation (pixels)", Configuration.ScaleSeparation, 8, 1024, 1, value => Configuration.ScaleSeparation = (int)Math.Round(value));
+                AddParameter("Contrast recovery", Configuration.ContrastRecovery, 0, 1, 0.01, value => Configuration.ContrastRecovery = value);
+                AddParameter("Saturation amount", Configuration.SaturationAmount, 0, 1, 0.01, value => Configuration.SaturationAmount = value);
+                AddParameter("Saturation boost", Configuration.SaturationBoost, 0, 1, 0.01, value => Configuration.SaturationBoost = value);
+                AddStretchToggle("Protect dark noise from saturation", Configuration.LightnessMask, value => Configuration.LightnessMask = value);
+                break;
             case FitsStretchType.AutoMtf:
                 AddParameter("Target median", Configuration.TargetMedian, 0.01, 0.95, 0.01,
                     value => Configuration.TargetMedian = value);
@@ -232,6 +253,19 @@ public sealed partial class FitsStretchWindow : Window
             default:
                 throw new ArgumentOutOfRangeException();
         }
+    }
+
+    private void AddStretchToggle(string title, bool value, Action<bool> changed, bool rebuild = false)
+    {
+        var toggle = new ToggleSwitch { Header = title, IsOn = value };
+        toggle.Toggled += (_, _) =>
+        {
+            if (_isUpdating) return;
+            changed(toggle.IsOn);
+            if (rebuild) RefreshEditor();
+            DraftChanged();
+        };
+        ParameterPanel.Children.Add(toggle);
     }
 
     private void BuildBackgroundControls()
@@ -712,6 +746,10 @@ public sealed partial class FitsStretchWindow : Window
             return;
         }
         Configuration.Type = choice.Type;
+        if (choice.Type == FitsStretchType.Layered)
+            Configuration.ColorStrategy = FitsStretchColorStrategy.LuminancePreserving;
+        if (choice.Type == FitsStretchType.MedianAnchor)
+            Configuration.TargetMedian = 0.25;
         RefreshEditor();
         DraftChanged();
     }
@@ -723,7 +761,12 @@ public sealed partial class FitsStretchWindow : Window
             return;
         }
         Configuration.ColorStrategy = choice.Strategy;
-        ColorHelpText.Text = choice.Strategy.Help();
+        if (Configuration.Type == FitsStretchType.Layered && choice.Strategy == FitsStretchColorStrategy.Unlinked)
+        {
+            Configuration.ColorStrategy = FitsStretchColorStrategy.LuminancePreserving;
+            RefreshEditor();
+        }
+        ColorHelpText.Text = Configuration.ColorStrategy.Help();
         DraftChanged();
     }
 

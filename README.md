@@ -58,6 +58,8 @@ are HEVC; playback depends on your browser's codec support.
 Open an image and choose **Parallax video…** from the toolbar's More options
 menu. Import aligned starless and unscreened-stars layers, or optionally use a
 separately installed RC-Astro CLI (`rc-astro.exe`) licensed for StarXTerminator.
+Choose that executable once under **Settings > External tools**; Parallax
+reuses the saved path across windows and app restarts.
 Manual-layer solving uses the selected stars even when the viewer contains
 the starless image.
 
@@ -91,6 +93,8 @@ See the [Windows parallax guide](docs/PARALLAX-VIDEO.md) for layer requirements,
 camera and tour controls, encoder availability and export limits. Windows
 0.8.4 uses published Seiza/C ABI 0.33.0, stacking 0.36.0, parallax 0.10.0 and
 image-io 0.8.0 crates, without vendored patches.
+Development builds now use Seiza/C ABI 0.38.0, stacking 0.41.0, parallax
+0.15.0, image-io 0.9.0, and stretch 0.3.0 from published crates.
 
 ## Image viewing and folder review
 
@@ -343,7 +347,15 @@ identifies any files that were already saved if a later stack is cancelled.
 ## Live folder stacking
 
 Choose **Live Stack** to watch a capture folder while an imaging session is in
-progress. Seiza waits until each FITS or XISF file has stopped changing, checks
+progress. Point it at the parent **LIGHT** folder: **Include subfolders** and
+**Separate stacks by filter** are on by default. L, R, G, B and other filters
+get independent live accumulators, calibration, counts, previews and checkpoints
+in one session. New filter groups appear automatically as captures arrive;
+an idle L stack does not prevent R from updating. Filter identity comes from
+the image header, falling back to recognized filename tokens, not arbitrary
+folder names. Files with neither are grouped as **Unfiltered**.
+
+Seiza waits until each FITS or XISF file has stopped changing, checks
 that it is a raw, compatible light frame, revalidates it against the active
 masters, and registers it into a filter-locked stack. File-system notifications
 keep the display responsive, while periodic full reconciliation catches files
@@ -352,8 +364,13 @@ that arrived while the folder or watcher was unavailable.
 The live window provides a bounded autostretched preview, accepted/rejected
 counts, calibration epochs, checkpoint health, and an SNR chart with measured
 noise, background, and cumulative exposure when the headers provide it. You
-can save a non-destructive FITS snapshot at any time or finish the accumulator
-to publish the final 32-bit floating-point FITS stack. When **Remove transients
+can select a filter to inspect, save a non-destructive FITS snapshot, or finish
+that accumulator without stopping the others. Save outputs outside the watched
+capture tree to prevent exported stacks being ingested by another group. Native
+startup/ingestion is limited to two simultaneous operations; each filter still
+retains its own accumulator in memory. Choose Auto MTF, Median Anchor, or Layered
+for the session's preview stretch. Finishing publishes
+the final 32-bit floating-point FITS stack. When **Remove transients
 after stacking** is on, finishing first reads every accepted frame again to
 reject trails, so it takes longer; snapshots skip this step.
 
@@ -362,8 +379,11 @@ calibration, and source-ledger state. **Pause and save** makes the session
 resumable; startup validates the newest native context and manifest together
 and can fall back to the previous complete generation after an interrupted
 write. Existing or automatically built masters can be applied atomically as a
-new calibration epoch. Selecting no new calibration while resuming preserves
-the masters recorded in the checkpoint.
+new calibration epoch. **Pause and save all** checkpoints every filter; finished
+filters remain finished when the session is reopened. Automatic calibration
+prepares masters separately for each filter. Turn **Separate stacks by filter**
+off to resume an older single-filter session. Selecting no new calibration while
+resuming preserves the masters recorded in the checkpoint.
 
 ![A four-frame live stack with a bounded comet preview, accepted-frame status, checkpoint health, and measured-versus-ideal SNR depth chart](docs/images/live-folder-stacking.jpg)
 
@@ -383,7 +403,7 @@ Other preview highlights still apply:
 
 - GPU-backed FITS and XISF viewing with a cached thumbnail browser and
   image-anchored pan, wheel zoom, and pinch zoom.
-- Seven stretch models, ordered adjustment stages, RGB strategies, automatic
+- Nine stretch models, ordered adjustment stages, RGB strategies, automatic
   and manual background correction, live histograms, and Richardson-Lucy
   deconvolution.
 - Local plate solving with WCS grids, deep-sky contours, named and field stars,
@@ -395,7 +415,7 @@ Other preview highlights still apply:
 
 ## Stretch and image processing
 
-- Stretch FITS and XISF data with Auto MTF, GHS, Percentile Asinh, Linear, Asinh,
+- Stretch FITS and XISF data with Auto MTF, Median Anchor, Layered, GHS, Percentile Asinh, Linear, Asinh,
   explicit MTF, or no stretch; stack and reorder stages with live previews,
   undo, and redo.
 - Correct additive gradients or multiplicative illumination with adjustable

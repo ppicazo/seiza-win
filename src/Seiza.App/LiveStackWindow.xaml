@@ -70,8 +70,15 @@
                             <ToggleSwitch
                                 x:Name="IncludeSubdirectoriesToggle"
                                 Header="Include subfolders"
-                                IsOn="False"
+                                IsOn="True"
                                 Toggled="Configuration_Changed" />
+                            <ToggleSwitch x:Name="SeparateFiltersToggle" Header="Separate stacks by filter" IsOn="True" Toggled="Configuration_Changed" />
+                            <TextBlock Text="Select the parent LIGHT folder to watch L, R, G, B and other filters together. New filters are discovered as images arrive. Turn this off to reopen an older single-stack session." TextWrapping="Wrap" />
+                            <ComboBox x:Name="LiveStretchPicker" Header="Preview stretch" SelectedIndex="0" HorizontalAlignment="Stretch">
+                                <ComboBoxItem Content="Auto MTF" Tag="AutoMtf" />
+                                <ComboBoxItem Content="Median Anchor" Tag="MedianAnchor" />
+                                <ComboBoxItem Content="Layered" Tag="Layered" />
+                            </ComboBox>
                             <ToggleSwitch
                                 x:Name="ResumeToggle"
                                 Header="Resume the most recent compatible session"
@@ -80,7 +87,7 @@
                                 OnContent="Restore when possible"
                                 Toggled="Configuration_Changed" />
                             <ToggleSwitch x:Name="AutomaticReferenceToggle" Header="Choose the best existing reference automatically" IsOn="False" Toggled="Configuration_Changed" />
-                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Scores existing raw lights matching the first light's filter and sensor. An empty folder starts with its first stable light; a resumed stack keeps its saved reference." TextWrapping="Wrap" />
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Scores compatible existing raw lights within each filter group. Empty groups start with their first stable light; resumed groups keep their saved reference." TextWrapping="Wrap" />
                             <TextBlock Style="{ThemeResource BodyStrongTextBlockStyle}" Text="Shared alignment reference (optional)" />
                             <Grid ColumnSpacing="10">
                                 <Grid.ColumnDefinitions>
@@ -438,6 +445,11 @@
 
                 <ScrollViewer x:Name="DetailsScroll" Grid.Column="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="14">
+                        <StackPanel x:Name="SessionGroupsPanel" Spacing="8" Visibility="Collapsed">
+                            <TextBlock x:Name="SessionStatusText" TextWrapping="Wrap" />
+                            <ComboBox x:Name="FilterGroupPicker" Header="Filter stack" HorizontalAlignment="Stretch" SelectionChanged="FilterGroup_SelectionChanged" />
+                            <TextBlock Text="All filters continue stacking while you view one. Snapshot and Finish apply to the selected filter; Pause saves the entire session." TextWrapping="Wrap" />
+                        </StackPanel>
                         <Border
                             Padding="16"
                             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"

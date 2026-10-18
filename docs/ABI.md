@@ -14,6 +14,12 @@ Rules:
 - Every exported operation catches panics and returns a host-readable error.
 - High-volume pixels use a contiguous BGRA8 buffer suitable for direct Win2D upload; evolving records use JSON.
 - FITS and XISF processing use the shared `seiza_rendered_image_open_with_stretch_config` JSON contract so ordered stretch stages, color strategy, background correction, light deconvolution, render `sample_domain`, and interactive-preview intent stay platform-neutral.
+- Stretch 0.3.0 adds `median-anchor` and `layered` stages. Windows serializes
+  their native snake-case parameter names, including nullable black-point sigma,
+  integer scale separation, and Boolean options. Layered supports linked or
+  luminance-preserving color, not unlinked RGB. Live previews retain their
+  physical-linear robust-percentile sample domain when selecting these stages;
+  no stretch math is duplicated in C#.
 - Source-star analysis uses the additive
   `seiza_stars_detect_path_json(path, options_json, error_out)` entry point.
   Windows requests `detectionBinning=2`, `sensitivity=30`,
