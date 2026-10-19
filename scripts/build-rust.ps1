@@ -97,6 +97,11 @@ else {
 $thumbnailCommand = "cargo $cargoAction --package seiza-thumbnail-provider --target-dir `"$targetDirectory`" --locked$releaseFlag"
 $platformCommand = "cargo $cargoAction --package seiza-platform --target-dir `"$targetDirectory`" --locked$releaseFlag"
 if ($Test) {
+    # Testing an rlib/cdylib crate does not emit its deployable DLL. Build both
+    # local DLLs explicitly before MSBuild evaluates native content items; on a
+    # clean runner no earlier build exists to satisfy their Exists conditions.
+    $thumbnailCommand += " && cargo build --package seiza-thumbnail-provider --target-dir `"$targetDirectory`" --locked$releaseFlag"
+    $platformCommand += " && cargo build --package seiza-platform --target-dir `"$targetDirectory`" --locked$releaseFlag"
     # Dependency dev-targets must run from the published archive, not the
     # application workspace. The shipped DLL still uses the application lock.
     $platformCommand += " && cargo test --manifest-path `"$($parallaxPackage.manifest_path)`" --package seiza-parallax --lib --target-dir `"$targetDirectory`" --locked$releaseFlag"
@@ -109,6 +114,14 @@ try {
     & $env:ComSpec /d /s /c $buildCommand
     if ($LASTEXITCODE -ne 0) {
         throw "Cargo failed with exit code $LASTEXITCODE."
+    }
+
+    $profileDirectory = Join-Path $targetDirectory $Configuration.ToLowerInvariant()
+    foreach ($dllName in @("seiza_cabi.dll", "seiza_thumbnail_provider.dll", "seiza_platform.dll")) {
+        $dllPath = Join-Path $profileDirectory $dllName
+        if (-not (Test-Path -LiteralPath $dllPath -PathType Leaf)) {
+            throw "Native build did not produce required DLL '$dllPath'."
+        }
     }
 
     $buildInfo = [ordered]@{
