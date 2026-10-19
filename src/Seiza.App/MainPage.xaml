@@ -322,6 +322,9 @@
                 </AppBarButton.Icon>
             </AppBarButton>
 
+            <AppBarButton Click="ColorStack_Click" Label="Color stacking" ToolTipService.ToolTip="Combine aligned RGB/LRGB stacks and calibrate color against Gaia">
+                <AppBarButton.Icon><FontIcon Glyph="&#xE790;" /></AppBarButton.Icon>
+            </AppBarButton>
         </CommandBar>
 
         <SplitView

@@ -45,6 +45,8 @@ internal sealed class ImageStackOptions
     public StackDemosaic Demosaic { get; set; } = StackDemosaic.Vng;
     public StackCfaIntegration CfaIntegration { get; set; } = StackCfaIntegration.Demosaic;
     public bool SuppressHotPixels { get; set; }
+    public bool LearnDefects { get; set; }
+    public JsonElement? LearnedDefects { get; set; }
     public double CosmeticLowSigma { get; set; } = 16;
     public double CosmeticHighSigma { get; set; } = 16;
 
@@ -172,7 +174,7 @@ internal sealed class ImageStackOptions
                 StackDemosaic.Mhc => "mhc",
                 StackDemosaic.Bilinear => "bilinear",
                 _ => null,
-            });
+            }, LearnedDefects);
         return JsonSerializer.Serialize(
             payload,
             SeizaJsonSerializerContext.Default.StackOptionsPayload);
@@ -697,7 +699,8 @@ internal sealed record StackOptionsPayload(
     [property: JsonPropertyName("weighting"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StackWeightingPayload? Weighting,
     [property: JsonPropertyName("cfa_integration"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CfaIntegration,
     [property: JsonPropertyName("interpolation"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Interpolation,
-    [property: JsonPropertyName("demosaic"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Demosaic);
+    [property: JsonPropertyName("demosaic"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Demosaic,
+    [property: JsonPropertyName("defects"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? Defects);
 
 internal sealed record StackCosmeticPayload(
     [property: JsonPropertyName("low_sigma")] double LowSigma,

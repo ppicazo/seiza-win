@@ -26,6 +26,7 @@ internal sealed class CalibrationPreparationService
     private readonly Func<CalibrationMasterBuildRequest, CancellationToken,
         Task<CalibrationMasterBuildResult>> _buildAsync;
     private readonly Func<string> _coreVersion;
+    private readonly Func<IReadOnlyList<string>, FlatQualityOptions, IProgress<CalibrationPreparationProgress>?, CancellationToken, Task<FlatQualityReview>> _reviewFlats;
 
     public CalibrationPreparationService()
         : this(
@@ -41,12 +42,14 @@ internal sealed class CalibrationPreparationService
         Func<CalibrationPlanRequest, CancellationToken, Task<CalibrationPlanResult>> planAsync,
         Func<CalibrationMasterBuildRequest, CancellationToken,
             Task<CalibrationMasterBuildResult>> buildAsync,
-        Func<string> coreVersion)
+        Func<string> coreVersion,
+        Func<IReadOnlyList<string>, FlatQualityOptions, IProgress<CalibrationPreparationProgress>?, CancellationToken, Task<FlatQualityReview>>? reviewFlats = null)
     {
         _probeAsync = probeAsync ?? throw new ArgumentNullException(nameof(probeAsync));
         _planAsync = planAsync ?? throw new ArgumentNullException(nameof(planAsync));
         _buildAsync = buildAsync ?? throw new ArgumentNullException(nameof(buildAsync));
         _coreVersion = coreVersion ?? throw new ArgumentNullException(nameof(coreVersion));
+        _reviewFlats = reviewFlats ?? FlatQualityService.ReviewAsync;
     }
 
     public async Task<CalibrationPreparationResult> PrepareAsync(
@@ -55,6 +58,7 @@ internal sealed class CalibrationPreparationService
         CancellationToken cancellationToken = default)
     {
         ValidateRequest(request);
+        request.Options.FlatQuality.Validate();
         using var retentionLeases = new CacheRetentionLeaseSet();
         CalibrationFrameProbe[] targetLights = NormalizeTargetLights(request);
         HashSet<string> protectedMasterPaths = NormalizeProtectedMasterPaths(request);
@@ -67,6 +71,7 @@ internal sealed class CalibrationPreparationService
             "Finding calibration frames."));
 
         var warnings = new List<string>();
+        var reviews = new List<FlatQualityReview>();
         string[] discovered = await Task.Run(
             () => DiscoverFiles(request.SourcePaths, cacheDirectory, warnings, cancellationToken),
             cancellationToken).ConfigureAwait(false);
@@ -243,6 +248,27 @@ internal sealed class CalibrationPreparationService
             }
         }
 
+        // Review the exact native selection, independently of master-cache reuse.
+        // A quality verdict never changes the metadata/pedestal admission gates.
+        if (request.Options.FlatQuality.Enabled)
+        {
+            if (!flatPlan.Ready || flatPlan.SelectedPaths.Length == 0)
+                warnings.Add("Flat quality was not reviewed: no usable raw flat set was selected.");
+            else
+            {
+                try
+                {
+                    reviews.Add(await _reviewFlats(flatPlan.SelectedPaths, request.Options.FlatQuality, progress, cancellationToken).ConfigureAwait(false));
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception error)
+                {
+                    warnings.Add($"Flat quality review could not be completed: {error.Message} Selection is unchanged; no passing verdict is available.");
+                }
+            }
+        }
+
         if (flatSafetyWarning is not null)
         {
             warnings.Add(flatSafetyWarning);
@@ -297,6 +323,7 @@ internal sealed class CalibrationPreparationService
             Calibration = calibration,
             Summaries = summaries,
             Warnings = warnings.ToArray(),
+            FlatQualityReviews = reviews.ToArray(),
             DiscoveredFiles = discovered.Length,
             ProbedFiles = probes.Length,
             RetentionLease = retentionLeases.TransferOwnership(),
@@ -1734,8 +1761,10 @@ internal sealed class CalibrationPreparationService
 
     private static string ReadCoreVersion()
     {
-        nint value = NativeMethods.GetCoreVersion();
-        return Marshal.PtrToStringUTF8(value) ?? "unknown";
+        // The persisted CoreVersion field is now a namespaced output version.
+        // Non-imaging release changes no longer invalidate master caches.
+        nint value = NativeMethods.GetStackingOutputVersion();
+        return "stacking-output:" + (Marshal.PtrToStringUTF8(value) ?? "unknown");
     }
 
     private static void ValidateRequest(CalibrationPreparationRequest request)

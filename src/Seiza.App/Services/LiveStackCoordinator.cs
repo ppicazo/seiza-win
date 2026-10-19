@@ -21,6 +21,9 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly SemaphoreSlim? _processingSlots;
+    private readonly Action<string>? _validateSessionOutput;
+    private readonly Func<LiveStackExportResult, Task>? _recordCompletion;
+    private string _previewProcessingJson;
     private readonly Func<CalibrationFrameProbe, CancellationToken, Task<CalibrationPreparationResult>>? _prepareCalibration;
     private CalibrationPreparationResult? _preparedCalibration;
     private readonly object _stateSync = new();
@@ -67,12 +70,17 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         TimeProvider? timeProvider = null,
         Func<IReadOnlyList<string>, CancellationToken, Task<StackReferenceSelection>>? referenceSelector = null,
         SemaphoreSlim? processingSlots = null,
-        Func<CalibrationFrameProbe, CancellationToken, Task<CalibrationPreparationResult>>? prepareCalibration = null)
+        Func<CalibrationFrameProbe, CancellationToken, Task<CalibrationPreparationResult>>? prepareCalibration = null,
+        Action<string>? validateSessionOutput = null,
+        Func<LiveStackExportResult, Task>? recordCompletion = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         configuration.Validate();
         _processingSlots = processingSlots;
         _prepareCalibration = prepareCalibration;
+        _validateSessionOutput = validateSessionOutput;
+        _recordCompletion = recordCompletion;
+        _previewProcessingJson = configuration.PreviewProcessingJson;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _createdAtUtc = _timeProvider.GetUtcNow();
         _configuration = SnapshotConfiguration(configuration);
@@ -108,6 +116,8 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
     /// to their DispatcherQueue.
     /// </remarks>
     public event EventHandler<LiveStackRunChangedEventArgs>? Changed;
+
+    internal string PreviewProcessingJson => Volatile.Read(ref _previewProcessingJson);
 
     public LiveStackRunSnapshot CurrentSnapshot
     {
@@ -196,6 +206,10 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                 SetState(
                     LiveStackRunState.Paused,
                     "Live-stack startup was cancelled; the open stack remains resumable.");
+            }
+            else
+            {
+                SetState(LiveStackRunState.Paused, "Startup cancelled before integrating a light. Resume explicitly to retry.");
             }
             throw;
         }
@@ -607,16 +621,20 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                     {
                         _exportedPaths.Add(fullOutputPath);
                     }
-                    // Retirement occurs only after the final export is durable.
-                    // A cancellation/write failure after native finalization leaves
-                    // the pre-finalization checkpoint eligible for recovery.
-                    await _store.RetireAsync(_sessionId, CancellationToken.None)
-                        .ConfigureAwait(false);
                     var result = new LiveStackExportResult(
                         fullOutputPath,
                         output.AcceptedFrames,
                         _rejectedFrames,
                         transientNote);
+                    // The parent must durably record completion BEFORE retirement.
+                    // If publication fails, leave the checkpoint available to resume.
+                    if (_recordCompletion is not null)
+                        await _recordCompletion(result).ConfigureAwait(false);
+                    // Retirement occurs only after the final export is durable.
+                    // A cancellation/write failure after native finalization leaves
+                    // the pre-finalization checkpoint eligible for recovery.
+                    await _store.RetireAsync(_sessionId, CancellationToken.None)
+                        .ConfigureAwait(false);
                     string saved =
                         $"Saved the completed stack to {Path.GetFileName(fullOutputPath)}.";
                     SetState(
@@ -971,7 +989,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         }
         catch (Exception exception)
         {
-            if (_session is not null)
+            if (_session is not null || exception is CalibrationPreparationException)
             {
                 // A committed reference or checkpoint failure must retain the
                 // normal safety path instead of pretending that startup was empty.
@@ -1021,10 +1039,41 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
 
         if (_prepareCalibration is not null && _preparedCalibration is null)
         {
-            _preparedCalibration = await _prepareCalibration(probe, cancellationToken).ConfigureAwait(false);
+            try { _preparedCalibration = await _prepareCalibration(probe, cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception exception) { throw new CalibrationPreparationException(exception); }
             _calibration = CloneCalibration(_preparedCalibration.Calibration);
             SeedCalibrationPaths(_calibration);
             foreach (string warning in _preparedCalibration.Warnings) AddAttention(warning);
+        }
+
+        if (_configuration.Options.LearnDefects && _configuration.Options.LearnedDefects is null)
+        {
+            var candidates = await new LiveStackReferenceCandidates(_monitorOptions)
+                .ObserveStableExistingAsync(_timeProvider, cancellationToken).ConfigureAwait(false);
+            var compatible = new List<StackFileReadyCandidate>();
+            foreach (var candidate in candidates)
+            {
+                try
+                {
+                    var other = await CalibrationService.ProbeAsync(candidate.Path, cancellationToken).ConfigureAwait(false);
+                    if (CalibrationLightEligibility.IsEligible(other) && LiveStackFilterIdentity.FromProbe(probe).Matches(LiveStackFilterIdentity.FromProbe(other)) &&
+                        LiveStackCalibrationIdentity.Matches(probe.Signature, other.Signature, out _) && LiveStackReferenceCandidates.IsUnchanged(candidate))
+                        compatible.Add(candidate);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception error) { AddAttention($"Defect learning skipped an unreadable light: {error.Message}", candidate.Path); }
+            }
+            if (compatible.Count < 3)
+            {
+                SetState(LiveStackRunState.WaitingForLight, "Waiting for at least three dithered lights in this filter to learn sensor defects.");
+                return false;
+            }
+            var learned = await StackDefectService.PrepareAsync(compatible.Select(item => item.Path).ToArray(),
+                _configuration.Options, _calibration, cancellationToken).ConfigureAwait(false);
+            if (compatible.Any(item => !LiveStackReferenceCandidates.IsUnchanged(item))) return false;
+            _configuration.Options.LearnedDefects = learned.LearnedDefects;
+            AddAttention("Learned a sensor defect map from dithered lights; it remains fixed for this stack and is retained in its native checkpoint.");
         }
 
         var file = new FileInfo(fullPath);
@@ -1613,6 +1662,11 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         {
             if (!await OpenInitialReferenceAsync(candidate.Path, cancellationToken, [candidate]).ConfigureAwait(false))
             {
+                if (_configuration.Options.LearnDefects && _configuration.Options.LearnedDefects is null)
+                {
+                    _monitor.ReportProcessingResult(candidate, new StackFileProcessingResult(StackFileProcessingDisposition.RetryableFailure, "Waiting for dithered learning frames"));
+                    return;
+                }
                 CompleteReadFailure(candidate, "The first light changed while it was being opened.");
                 return;
             }
@@ -1632,7 +1686,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         }
         catch (Exception exception)
         {
-            if (_session is not null)
+            if (_session is not null || exception is CalibrationPreparationException)
             {
                 // The initial reference and its ledger already committed.
                 // A checkpoint failure must retain the resumability block.
@@ -1730,6 +1784,30 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         }
     }
 
+    public async Task SetPreviewStretchAsync(FitsStretchType type, CancellationToken cancellationToken = default)
+    {
+        string json = LiveStackRunConfiguration.PreviewProcessingJsonFor(type);
+        // Startup/restore owns the lifecycle gate before it publishes a native
+        // handle; ingestion owns the operation gate. Respect both boundaries.
+        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ThrowIfDisposed();
+            await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                _previewProcessingJson = json;
+                if (_session is not null)
+                    await TryRenderPreviewAsync(force: true, cancellationToken).ConfigureAwait(false);
+            }
+            finally { _operationGate.Release(); }
+        }
+        finally { _lifecycleGate.Release(); }
+    }
+
+    private sealed class CalibrationPreparationException(Exception inner)
+        : Exception($"Calibration preparation failed: {inner.Message}", inner);
+
     private async Task TryRenderPreviewAsync(
         bool force,
         CancellationToken cancellationToken)
@@ -1749,7 +1827,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         try
         {
             RenderedImageData preview = await session!.RenderPreviewAsync(
-                _configuration.PreviewProcessingJson,
+                _previewProcessingJson,
                 _configuration.PreviewMaxDimension,
                 cancellationToken).ConfigureAwait(false);
             lock (_stateSync)
@@ -1799,6 +1877,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                 IncludesSubdirectories = _configuration.IncludeSubdirectories,
                 OutputPath = _outputPath,
                 StackOptionsJson = _optionsJson,
+                LearnDefects = _configuration.Options.LearnDefects,
                 CreatedAtUtc = _createdAtUtc,
                 UpdatedAtUtc = now,
                 CalibrationHistory = [.. _calibrationHistory],
@@ -1991,6 +2070,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         string.Equals(state.GroupId, _configuration.GroupId, StringComparison.Ordinal) &&
         PathsEqual(state.WatchFolder, _configuration.WatchFolder) &&
         state.IncludesSubdirectories == _configuration.IncludeSubdirectories &&
+        state.LearnDefects == _configuration.Options.LearnDefects &&
         string.Equals(state.StackOptionsJson, _optionsJson, StringComparison.Ordinal);
 
     private void MarkCheckpointDirtyLocked()
@@ -2219,6 +2299,12 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
 
     private void EnsureSafeOutputPath(string outputPath)
     {
+        ValidateLocalOutputPath(outputPath);
+        _validateSessionOutput?.Invoke(outputPath);
+    }
+
+    internal void ValidateLocalOutputPath(string outputPath)
+    {
         string[] sources;
         lock (_stateSync)
         {
@@ -2256,6 +2342,11 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
 
     private void ValidateAlignmentCalibration(ImageStackCalibration calibration)
     {
+        if (_configuration.Options.LearnDefects && (calibration.DarkPath is not null ||
+            (_session is not null && !LiveStackCalibrationSelection.AreEquivalent(_calibration, calibration))))
+        {
+            throw new InvalidOperationException("A learned defect map requires fixed calibration without a master dark. Start a new stack to change its calibration.");
+        }
         if (_alignmentReferencePath is not null &&
             new[] { calibration.BiasPath, calibration.DarkPath, calibration.FlatPath }
                 .Any(path => LiveStackPath.Equals(path, _alignmentReferencePath)))

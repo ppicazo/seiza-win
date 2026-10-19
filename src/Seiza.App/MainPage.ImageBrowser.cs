@@ -27,6 +27,14 @@ public sealed partial class MainPage
 
     private void InitializeImageBrowser()
     {
+        _browserGrouping = CatalogSettingsStore.LoadBrowserGrouping();
+        BrowserGroupingBox.SelectedIndex = _browserGrouping switch
+        {
+            ImageBrowserGrouping.Filter => 1,
+            ImageBrowserGrouping.FileType => 2,
+            ImageBrowserGrouping.None => 3,
+            _ => 0,
+        };
         _browserInitialized = true;
         UpdateBrowserControls();
     }
@@ -246,6 +254,11 @@ public sealed partial class MainPage
             3 => ImageBrowserGrouping.None,
             _ => ImageBrowserGrouping.Folder,
         };
+        try { CatalogSettingsStore.SaveBrowserGrouping(_browserGrouping); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _browserStatus = $"Grouping changed, but the preference could not be saved: {exception.Message}";
+        }
         RebuildBrowserGroups(selected);
         RevealBrowserSelection();
         UpdateNavigationState();

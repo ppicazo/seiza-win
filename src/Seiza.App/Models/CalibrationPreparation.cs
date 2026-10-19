@@ -14,6 +14,7 @@ internal sealed record CalibrationPreparationRequest
 
 internal sealed record CalibrationPreparationOptions
 {
+    public FlatQualityOptions FlatQuality { get; init; } = new();
     public int MinimumBiasFrames { get; init; } = 2;
     public int MinimumDarkFrames { get; init; } = 2;
     public int MinimumDarkFlatFrames { get; init; } = 2;
@@ -31,6 +32,7 @@ internal enum CalibrationPreparationStage
     Discovering,
     Probing,
     Planning,
+    Reviewing,
     Building,
     Completed,
 }
@@ -61,6 +63,7 @@ internal sealed class CalibrationPreparationResult : IDisposable
     public required ImageStackCalibration Calibration { get; init; }
     public required CalibrationPreparationKindSummary[] Summaries { get; init; }
     public required string[] Warnings { get; init; }
+    public FlatQualityReview[] FlatQualityReviews { get; init; } = [];
     public int DiscoveredFiles { get; init; }
     public int ProbedFiles { get; init; }
 

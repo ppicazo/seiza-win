@@ -14,6 +14,62 @@ public sealed class CalibrationPreparationServiceTests : IDisposable
     public CalibrationPreparationServiceTests() => Directory.CreateDirectory(_directory);
 
     [Fact]
+    public async Task FlatQualityReviewsExactRawSelectionEvenWhenMasterIsCached()
+    {
+        string source = Path.Combine(_directory, "quality-library");
+        Directory.CreateDirectory(source);
+        foreach (string name in new[] { "bias-1", "bias-2", "flat-1", "flat-2", "flat-3", "master-flat" })
+            FlatQualityTests.WriteFlat(source, name, name == "flat-3" ? 2500 : 30000);
+        var builds = new List<CalibrationMasterBuildRequest>();
+        int reviews = 0;
+        var service = CreateService(builds, (path, _) => Task.FromResult(Probe(path)), reviewFlats: async (paths, options, progress, token) =>
+        {
+            reviews++;
+            return await FlatQualityService.ReviewAsync(paths, options, progress, token);
+        });
+        var request = Request(source, Path.Combine(_directory, "cache"));
+        using var disabled = await service.PrepareAsync(request);
+        int buildCount = builds.Count;
+        Assert.Empty(disabled.FlatQualityReviews);
+        Assert.Equal(0, reviews);
+        request = request with { Options = request.Options with { FlatQuality = new() { Enabled = true } } };
+        using var reviewed = await service.PrepareAsync(request);
+        var review = Assert.Single(reviewed.FlatQualityReviews);
+        Assert.Equal(reviewed.Summaries.Single(s => s.Kind == "flat").Plan.SelectedPaths, review.Paths);
+        Assert.Equal(3, review.Paths.Length);
+        Assert.DoesNotContain(review.Paths, path => Path.GetFileName(path).StartsWith("master-", StringComparison.Ordinal));
+        Assert.Equal(buildCount, builds.Count);
+        Assert.Equal(disabled.Calibration.FlatPath, reviewed.Calibration.FlatPath);
+        Assert.True(reviewed.Summaries.Single(s => s.Kind == "flat").CacheReused);
+        using var otherUnits = await service.PrepareAsync(request with { Options = request.Options with { FlatQuality = new() { Enabled = true, FullScale = 1 } } });
+        Assert.Equal(2, reviews);
+        Assert.Equal(buildCount, builds.Count);
+        Assert.Equal(reviewed.Calibration.FlatPath, otherUnits.Calibration.FlatPath);
+        Assert.Equal(review.Paths, Assert.Single(otherUnits.FlatQualityReviews).Paths);
+    }
+
+    [Fact]
+    public async Task FailedFlatReviewIsExplicitAndCancelledReviewNeverPublishesPreparation()
+    {
+        string source = Path.Combine(_directory, "quality-failure");
+        Directory.CreateDirectory(source);
+        foreach (string name in new[] { "bias-1", "bias-2", "flat-1", "flat-2" })
+            FlatQualityTests.WriteFlat(source, name);
+        var builds = new List<CalibrationMasterBuildRequest>();
+        var request = Request(source, Path.Combine(_directory, "cache")) with
+        { Options = new() { FlatQuality = new() { Enabled = true } } };
+        var failing = CreateService(builds, (path, _) => Task.FromResult(Probe(path)),
+            reviewFlats: (_, _, _, _) => throw new IOException("fixture unreadable"));
+        using var result = await failing.PrepareAsync(request);
+        Assert.Empty(result.FlatQualityReviews);
+        Assert.Contains(result.Warnings, warning => warning.Contains("could not be completed") && warning.Contains("no passing verdict"));
+        Assert.NotNull(result.Calibration.FlatPath);
+        var cancelled = CreateService(builds, (path, _) => Task.FromResult(Probe(path)),
+            reviewFlats: (_, _, _, _) => throw new OperationCanceledException());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled.PrepareAsync(request));
+    }
+
+    [Fact]
     public async Task BuildsDependenciesInOrderAndReusesContentAddressedCache()
     {
         string source = Path.Combine(_directory, "library");
@@ -1251,7 +1307,8 @@ public sealed class CalibrationPreparationServiceTests : IDisposable
         List<CalibrationPlanRequest>? plans = null,
         Func<CalibrationPlanRequest, CalibrationPlanResult>? planner = null,
         Func<CalibrationMasterBuildRequest, CancellationToken,
-            Task<CalibrationMasterBuildResult>>? builder = null) => new(
+            Task<CalibrationMasterBuildResult>>? builder = null,
+        Func<IReadOnlyList<string>, FlatQualityOptions, IProgress<CalibrationPreparationProgress>?, CancellationToken, Task<FlatQualityReview>>? reviewFlats = null) => new(
             probe,
             (request, _) =>
             {
@@ -1268,7 +1325,7 @@ public sealed class CalibrationPreparationServiceTests : IDisposable
                 await File.WriteAllBytesAsync(request.Output, [7, 8, 9], token);
                 return BuildResult(request, request.Inputs, []);
             },
-            coreVersion ?? (() => "0.18.0"));
+            coreVersion ?? (() => "0.18.0"), reviewFlats);
 
     private static CalibrationMasterBuildResult BuildResult(
         CalibrationMasterBuildRequest request,

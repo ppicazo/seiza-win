@@ -29,6 +29,7 @@ internal sealed class LiveStackSessionCoordinator : IAsyncDisposable
     private readonly Dictionary<string, LiveStackFilterGroup> _groups = new(StringComparer.Ordinal);
     private readonly object _sync = new();
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
+    private readonly SemaphoreSlim _registryGate = new(1, 1);
     private readonly SemaphoreSlim _processingSlots = new(2, 2);
     private readonly StackFolderMonitor _monitor;
     private readonly string _registryPath;
@@ -36,6 +37,7 @@ internal sealed class LiveStackSessionCoordinator : IAsyncDisposable
     private Task _discovery = Task.CompletedTask;
     private FileStream? _lease;
     private bool _loaded, _disposed;
+    private string _previewProcessingJson;
 
     public LiveStackSessionCoordinator(LiveStackRunConfiguration configuration,
         Func<CalibrationFrameProbe, CancellationToken, Task<CalibrationPreparationResult>>? prepareCalibration = null)
@@ -43,6 +45,7 @@ internal sealed class LiveStackSessionCoordinator : IAsyncDisposable
         configuration.Validate();
         _configuration = configuration with { Options = configuration.Options.Copy(), Calibration = configuration.Calibration.Copy() };
         _prepareCalibration = prepareCalibration;
+        _previewProcessingJson = configuration.PreviewProcessingJson;
         _registryPath = Path.Combine(configuration.SessionRootDirectory, "filters.json");
         _monitor = new StackFolderMonitor(new StackFolderMonitorOptions
         {
@@ -107,10 +110,13 @@ internal sealed class LiveStackSessionCoordinator : IAsyncDisposable
                 GroupTitle = filter.DisplayName,
                 TargetFilter = filter,
                 InitialReferencePath = null,
+                PreviewProcessingJson = _previewProcessingJson,
                 // Automatic calibration runs independently when each fresh
                 // group finds its reference; restored groups keep their masters.
                 ApplyCalibrationOnResume = _prepareCalibration is null && _configuration.ApplyCalibrationOnResume,
-            }, processingSlots: _processingSlots, prepareCalibration: _prepareCalibration);
+            }, processingSlots: _processingSlots, prepareCalibration: _prepareCalibration,
+                validateSessionOutput: ValidateOutputPath,
+                recordCompletion: result => RecordCompletionAsync(filter.Key, result));
             coordinator.Changed += GroupChanged;
             var group = new LiveStackFilterGroup(filter, coordinator);
             _groups.Add(filter.Key, group);
@@ -179,13 +185,41 @@ internal sealed class LiveStackSessionCoordinator : IAsyncDisposable
 
     private async Task SaveRegistryAsync(CancellationToken cancellationToken)
     {
+        await _registryGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { await SaveRegistryCoreAsync(cancellationToken).ConfigureAwait(false); }
+        finally { _registryGate.Release(); }
+    }
+
+    private async Task RecordCompletionAsync(string key, LiveStackExportResult result)
+    {
+        await _registryGate.WaitAsync().ConfigureAwait(false);
+        LiveStackFilterGroup group;
+        lock (_sync) group = _groups[key];
+        try
+        {
+            group.Completed = true;
+            try { await SaveRegistryCoreAsync(CancellationToken.None).ConfigureAwait(false); }
+            catch { group.Completed = false; throw; }
+            Status = $"Saved {group.Filter.DisplayName} to {Path.GetFileName(result.OutputPath)}; other filters continue.";
+        }
+        finally { _registryGate.Release(); }
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private async Task SaveRegistryCoreAsync(CancellationToken cancellationToken)
+    {
         string temporary = _registryPath + ".tmp";
         try
         {
-            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(new FilterRegistry(1,
+            byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new FilterRegistry(1,
                 Groups.Select(group => new FilterEntry(
                     group.Filter.Source == LiveStackFilterSource.Unspecified ? null : group.Filter.DisplayName,
-                    group.Completed || group.Coordinator.CurrentSnapshot.State == LiveStackRunState.Completed)).ToArray())), cancellationToken).ConfigureAwait(false);
+                    group.Completed || group.Coordinator.CurrentSnapshot.State == LiveStackRunState.Completed)).ToArray()));
+            await using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+                stream.Flush(flushToDisk: true);
+            }
             File.Move(temporary, _registryPath, overwrite: true);
         }
         finally { File.Delete(temporary); }
@@ -214,12 +248,45 @@ internal sealed class LiveStackSessionCoordinator : IAsyncDisposable
 
     public void ValidateOutputPath(string path)
     {
-        string relative = Path.GetRelativePath(_configuration.WatchFolder, Path.GetFullPath(path));
-        if (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            throw new InvalidOperationException("Save session outputs outside the capture folder so no filter can ingest an exported stack.");
-        if (Groups.SelectMany(group => group.Coordinator.CurrentSnapshot.Frames)
-            .Any(frame => StackSourceIdentity.RefersToSameFile(frame.Path, path)))
-            throw new InvalidOperationException("The output cannot replace a captured light from any filter.");
+        string output = Path.GetFullPath(path);
+        string resolvedOutput = WindowsFileIdentity.TryResolveFinalPath(output) ?? output;
+        foreach (string root in new[] { _configuration.WatchFolder, _configuration.SessionRootDirectory })
+        {
+            string resolvedRoot = WindowsFileIdentity.TryResolveFinalPath(root) ?? root;
+            if (LiveStackPath.IsWithinDirectory(output, root) || LiveStackPath.IsWithinDirectory(resolvedOutput, resolvedRoot))
+                throw new InvalidOperationException("Save outputs outside the capture and session checkpoint folders.");
+            // Also reject hard links outside the trees, including not-yet-admitted
+            // lights and another filter's metadata. Never follow descendant links.
+            if (File.Exists(output) && Directory.Exists(root))
+            {
+                var options = new EnumerationOptions { RecurseSubdirectories = true,
+                    AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = false };
+                foreach (string source in Directory.EnumerateFiles(root, "*", options))
+                    if (StackSourceIdentity.RefersToSameFile(source, output))
+                        throw new InvalidOperationException("The output aliases a capture or session checkpoint file.");
+            }
+        }
+        foreach (LiveStackFilterGroup group in Groups) group.Coordinator.ValidateLocalOutputPath(output);
+    }
+
+    public async Task SetPreviewStretchAsync(FitsStretchType type, CancellationToken cancellationToken = default)
+    {
+        string json = LiveStackRunConfiguration.PreviewProcessingJsonFor(type);
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            LiveStackFilterGroup[] groups;
+            lock (_sync)
+            {
+                _previewProcessingJson = json;
+                groups = _groups.Values.ToArray();
+            }
+            // Groups added after this snapshot inherit the new setting above.
+            foreach (LiveStackFilterGroup group in groups.Where(group => !group.Completed))
+                await group.Coordinator.SetPreviewStretchAsync(type, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _lifecycle.Release(); }
     }
 
     public async ValueTask DisposeAsync()
@@ -239,6 +306,7 @@ internal sealed class LiveStackSessionCoordinator : IAsyncDisposable
             _cancellation?.Dispose();
             _lease?.Dispose();
             _processingSlots.Dispose();
+            _registryGate.Dispose();
             _disposed = true;
         }
         finally { _lifecycle.Release(); }

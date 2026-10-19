@@ -15,6 +15,9 @@ namespace Seiza.App;
 
 public sealed partial class LiveStackWindow : Window, IDisposable
 {
+    private static readonly SemaphoreSlim CalibrationReviewGate = new(1, 1);
+    private void ColorStack_Click(object sender, RoutedEventArgs e) => App.ShowColorStack();
+
     private readonly TaskCompletionSource<string?> _completion = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ImageStackCalibration _manualCalibration = new();
@@ -67,6 +70,38 @@ public sealed partial class LiveStackWindow : Window, IDisposable
     private nint WindowHandle => WinRT.Interop.WindowNative.GetWindowHandle(this);
 
     private bool IsConfigured => ConfigurationScrollViewer.Visibility == Visibility.Visible;
+
+    private bool ShowingOverview => _session is not null && AllFiltersToggle.IsOn;
+
+    private async void RunningStretch_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_initializing || _closed || _busy || IsConfigured || (_session is null && _coordinator is null)) return;
+        SetBusy(true);
+        try
+        {
+            var type = Enum.Parse<FitsStretchType>(SelectedTag(RunningStretchPicker));
+            if (_session is not null) await _session.SetPreviewStretchAsync(type);
+            else if (_coordinator is not null) await _coordinator.SetPreviewStretchAsync(type);
+        }
+        catch (Exception exception) { if (!_closed) ShowRunError(exception.Message); }
+        finally { SetBusy(false); }
+    }
+
+    private void AllFilters_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_initializing || _closed || _session is null) return;
+        RefreshSessionGroups();
+    }
+
+    private void OpenOverviewFilter(string key)
+    {
+        if (_closed || _busy) return;
+        LiveStackFilterGroup? group = _displayedGroups.FirstOrDefault(group => group.Filter.Key == key);
+        if (group is null) return;
+        SelectGroup(group);
+        AllFiltersToggle.IsOn = false;
+        RefreshSessionGroups();
+    }
 
     private void ContentRoot_Loaded(object sender, RoutedEventArgs e)
     {
@@ -351,6 +386,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
             ? StackCfaIntegration.BayerDrizzle
             : StackCfaIntegration.Demosaic,
         SuppressHotPixels = SuppressHotPixelsToggle.IsOn,
+        LearnDefects = LearnDefectsToggle.IsOn,
         CosmeticLowSigma = FiniteValue(CosmeticLowSigmaBox, 16),
         CosmeticHighSigma = FiniteValue(CosmeticHighSigmaBox, 16),
         Rejection = SelectedTag(RejectionPicker) == "None"
@@ -474,8 +510,8 @@ public sealed partial class LiveStackWindow : Window, IDisposable
                     await PrepareAutomaticCalibrationAsync(preparationCancellation.Token);
                 pendingCalibration = prepared;
                 _initialReferencePath = referencePath;
-                if (prepared.Warnings.Length > 0 &&
-                    !await ConfirmCalibrationWarningsAsync(prepared.Warnings))
+                if ((prepared.Warnings.Length > 0 || prepared.FlatQualityReviews.Length > 0) &&
+                    !await ConfirmCalibrationWarningsAsync(prepared.Warnings, prepared.FlatQualityReviews, preparationCancellation.Token))
                 {
                     preparationCancellation.Token.ThrowIfCancellationRequested();
                     ShowConfigurationError(
@@ -514,6 +550,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
             pendingCalibration = null;
             _runOperationError = null;
             ConfigurationScrollViewer.Visibility = Visibility.Collapsed;
+            RunningStretchPicker.SelectedIndex = LiveStretchPicker.SelectedIndex;
             RunningPanel.Visibility = Visibility.Visible;
             _checkpointAgeTimer.Start();
             PauseButton.Visibility = Visibility.Visible;
@@ -592,6 +629,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
                 SourcePaths = [Path.GetFullPath(CalibrationFolderTextBox.Text)],
                 CacheDirectory = cacheDirectory,
                 ProtectedMasterPaths = alignmentReferencePath is null ? [] : [alignmentReferencePath],
+                Options = new() { FlatQuality = FlatQualityOptions.ReadOptions() },
             },
             progress,
             cancellationToken);
@@ -600,31 +638,24 @@ public sealed partial class LiveStackWindow : Window, IDisposable
     }
 
     private async Task<bool> ConfirmCalibrationWarningsAsync(
-        string[] warnings)
+        string[] warnings, FlatQualityReview[] reviews, CancellationToken token)
     {
-        string content = CalibrationPreparationWarningText.Format(warnings);
+        var dialog = CalibrationReviewDialog.Create(Content.XamlRoot, warnings, reviews, "Start live stacking");
+        return await ShowTrackedDialogAsync(dialog, token) == ContentDialogResult.Primary;
+    }
 
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Content.XamlRoot,
-            Title = "Calibration needs attention",
-            Content = new ScrollViewer
-            {
-                MaxHeight = 320,
-                Content = new TextBlock
-                {
-                    Text = content,
-                    TextWrapping = TextWrapping.Wrap,
-                },
-            },
-            PrimaryButtonText = "Start live stacking",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-        };
-        _activeDialog = dialog;
+    private async Task<ContentDialogResult> ShowTrackedDialogAsync(ContentDialog dialog, CancellationToken token = default)
+    {
+        await CalibrationReviewGate.WaitAsync(token);
         try
         {
-            return await dialog.ShowAsync() == ContentDialogResult.Primary;
+            token.ThrowIfCancellationRequested();
+            if (_closed || _closeInProgress) throw new OperationCanceledException(token);
+            _activeDialog = dialog;
+            using var registration = token.Register(() => DispatcherQueue.TryEnqueue(() => dialog.Hide()));
+            var result = await dialog.ShowAsync();
+            token.ThrowIfCancellationRequested();
+            return result;
         }
         finally
         {
@@ -632,6 +663,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
             {
                 _activeDialog = null;
             }
+            CalibrationReviewGate.Release();
         }
     }
 
@@ -712,15 +744,11 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         {
             string library = CalibrationFolderTextBox.Text;
             string? alignment = configuration.AlignmentReferencePath;
+            var quality = SelectedTag(CalibrationModePicker) == "Automatic" ? FlatQualityOptions.ReadOptions() : new FlatQualityOptions();
+            quality.Validate();
             Func<CalibrationFrameProbe, CancellationToken, Task<CalibrationPreparationResult>>? prepare =
                 SelectedTag(CalibrationModePicker) == "Automatic"
-                ? (reference, token) => new CalibrationPreparationService().PrepareAsync(new CalibrationPreparationRequest
-                {
-                    Reference = reference,
-                    SourcePaths = [Path.GetFullPath(library)],
-                    CacheDirectory = CalibrationCachePaths.ForLibrary(library),
-                    ProtectedMasterPaths = alignment is null ? [] : [alignment],
-                }, null, token)
+                ? (reference, token) => PrepareFilterCalibrationAsync(reference, library, alignment, quality, token)
                 : null;
             var session = new LiveStackSessionCoordinator(configuration with
             {
@@ -742,6 +770,40 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         await Task.Yield();
     }
 
+    private async Task<CalibrationPreparationResult> PrepareFilterCalibrationAsync(CalibrationFrameProbe reference,
+        string library, string? alignment, FlatQualityOptions quality, CancellationToken token)
+    {
+        var result = await new CalibrationPreparationService().PrepareAsync(new CalibrationPreparationRequest
+        {
+            Reference = reference, SourcePaths = [Path.GetFullPath(library)],
+            CacheDirectory = CalibrationCachePaths.ForLibrary(library),
+            ProtectedMasterPaths = alignment is null ? [] : [alignment],
+            Options = new() { FlatQuality = quality },
+        }, null, token).ConfigureAwait(false);
+        try
+        {
+            string group = LiveStackFilterIdentity.FromProbe(reference).DisplayName;
+            for (int i = 0; i < result.FlatQualityReviews.Length; i++)
+                result.FlatQualityReviews[i] = result.FlatQualityReviews[i] with { GroupTitle = group };
+            if (result.Warnings.Length > 0 || result.FlatQualityReviews.Length > 0)
+            {
+                var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                if (!DispatcherQueue.TryEnqueue(async () =>
+                {
+                    try { completion.TrySetResult(await ConfirmCalibrationWarningsAsync(
+                        result.Warnings.Select(warning => $"{group}: {warning}").ToArray(), result.FlatQualityReviews, token)); }
+                    catch (OperationCanceledException) { completion.TrySetCanceled(token); }
+                    catch (Exception error) { completion.TrySetException(error); }
+                })) throw new OperationCanceledException("The live stack window is no longer available.", token);
+                if (!await completion.Task.ConfigureAwait(false))
+                    throw new OperationCanceledException($"Calibration review cancelled for {group}; no lights processed. Restart the session to review again.", token);
+            }
+            token.ThrowIfCancellationRequested();
+            return result;
+        }
+        catch { result.Dispose(); throw; }
+    }
+
     private void Session_Changed(object? sender, EventArgs e)
     {
         if (Interlocked.Exchange(ref _groupRefreshQueued, 1) != 0) return;
@@ -760,6 +822,19 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         {
             LiveStackFilterGroup[] groups = _session.Groups.ToArray();
             _displayedGroups = groups;
+            OverviewScroll.Visibility = ShowingOverview ? Visibility.Visible : Visibility.Collapsed;
+            SinglePreviewPanel.Visibility = ShowingOverview ? Visibility.Collapsed : Visibility.Visible;
+            AllFiltersToggle.IsEnabled = !_busy;
+            if (ShowingOverview)
+            {
+                _previewBitmap?.Dispose();
+                _previewBitmap = null;
+                _displayedPreview = null;
+                FilterOverview.OpenFilter = OpenOverviewFilter;
+                FilterOverview.SetItems(groups.Select(group => LiveStackOverviewItem.Create(
+                    group.Filter, group.Coordinator.CurrentSnapshot, group.Completed, group.Error)).ToArray(), !_busy);
+            }
+            else FilterOverview.Clear();
             LiveStackFilterGroup? selected = groups.FirstOrDefault(group => ReferenceEquals(group.Coordinator, _coordinator)) ?? groups.FirstOrDefault();
             FilterGroupPicker.ItemsSource = groups.Select(group => group.ToString()).ToArray();
             FilterGroupPicker.SelectedIndex = selected is null ? -1 : Array.IndexOf(groups, selected);
@@ -776,6 +851,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
     {
         if (_updatingGroups || _session is null) return;
         SelectGroup(_displayedGroups.ElementAtOrDefault(FilterGroupPicker.SelectedIndex));
+        AllFiltersToggle.IsOn = false;
         RefreshSessionGroups();
     }
 
@@ -878,7 +954,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         AttentionCard.Visibility = hasAttention ? Visibility.Visible : Visibility.Collapsed;
         AttentionList.ItemsSource = hasAttention ? attention : null;
 
-        if (snapshot.Preview is not null &&
+        if (!ShowingOverview && snapshot.Preview is not null &&
             !ReferenceEquals(_displayedPreview, snapshot.Preview))
         {
             try
@@ -922,8 +998,8 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         if (_session is not null)
         {
             bool completed = snapshot.State == LiveStackRunState.Completed;
-            PrimaryButton.IsEnabled &= !completed;
-            SnapshotButton.IsEnabled &= !completed;
+            PrimaryButton.IsEnabled &= !completed && !ShowingOverview;
+            SnapshotButton.IsEnabled &= !completed && !ShowingOverview;
             PauseButton.Content = _session.IsPaused ? "Resume all filters" : "Pause and save all";
             PauseButton.IsEnabled = !_busy;
         }
@@ -1217,18 +1293,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
             CloseButtonText = "OK",
             DefaultButton = ContentDialogButton.Close,
         };
-        _activeDialog = dialog;
-        try
-        {
-            await dialog.ShowAsync();
-        }
-        finally
-        {
-            if (ReferenceEquals(_activeDialog, dialog))
-            {
-                _activeDialog = null;
-            }
-        }
+        await ShowTrackedDialogAsync(dialog);
     }
 
     private async Task<LiveStackOutputSelection?> PickOutputPathAsync(string suggestedName)
@@ -1269,6 +1334,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
             return;
         }
         ConfigurationScrollViewer.IsEnabled = !busy;
+        RunningStretchPicker.IsEnabled = !busy;
         if (IsConfigured)
         {
             UpdateConfigurationState();
@@ -1478,6 +1544,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
         _previewBitmap?.Dispose();
         _previewBitmap = null;
         _displayedPreview = null;
+        FilterOverview.Dispose();
         _checkpointAgeTimer.Stop();
         _checkpointAgeTimer.Tick -= CheckpointAgeTimer_Tick;
         PreviewCanvas.RemoveFromVisualTree();

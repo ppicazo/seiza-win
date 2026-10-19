@@ -250,6 +250,8 @@
                                             <ComboBoxItem Content="Bayer drizzle" Tag="BayerDrizzle" />
                                         </ComboBox>
                                     </Grid>
+                                    <ToggleSwitch x:Name="LearnDefectsToggle" Header="Learn sensor defects from dithered lights (no master dark)" IsOn="False" Toggled="Configuration_Changed" />
+                                    <TextBlock Text="Waits for three compatible lights per filter. Dithering or drift is required. The learned map stays fixed and is restored with the checkpoint." TextWrapping="Wrap" />
                                     <ToggleSwitch x:Name="SuppressHotPixelsToggle" Header="Suppress hot and dead pixels" IsOn="False" Toggled="Configuration_Changed" ToolTipService.ToolTip="Replace isolated impulse pixels after calibration and before demosaicing. Conservative defaults preserve star structure." />
                                     <Grid x:Name="CosmeticOptionsPanel" ColumnSpacing="12" Visibility="Collapsed">
                                         <Grid.ColumnDefinitions>
@@ -366,6 +368,7 @@
                                 </Grid>
                                 <ProgressBar x:Name="CalibrationProgressBar" IsIndeterminate="False" Maximum="1" Minimum="0" Visibility="Collapsed" />
                                 <TextBlock x:Name="CalibrationSummaryText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                <local:FlatQualityOptionsControl x:Name="FlatQualityOptions" />
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -427,19 +430,25 @@
                     BorderThickness="1"
                     CornerRadius="8">
                     <Grid>
-                        <canvas:CanvasControl
-                            x:Name="PreviewCanvas"
-                            AutomationProperties.Name="Live stack preview"
-                            ClearColor="#FF090A0C"
-                            Draw="PreviewCanvas_Draw" />
-                        <StackPanel
-                            x:Name="EmptyPreviewPanel"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Spacing="8">
-                            <ProgressRing x:Name="WaitingProgressRing" Width="28" Height="28" IsActive="True" />
-                            <TextBlock Foreground="White" Text="Waiting for the first complete light frame…" />
-                        </StackPanel>
+                        <ScrollViewer x:Name="OverviewScroll" Visibility="Collapsed" Padding="12"
+                            HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                            <local:LiveStackOverview x:Name="FilterOverview" />
+                        </ScrollViewer>
+                        <Grid x:Name="SinglePreviewPanel">
+                            <canvas:CanvasControl
+                                x:Name="PreviewCanvas"
+                                AutomationProperties.Name="Live stack preview"
+                                ClearColor="#FF090A0C"
+                                Draw="PreviewCanvas_Draw" />
+                            <StackPanel
+                                x:Name="EmptyPreviewPanel"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Spacing="8">
+                                <ProgressRing x:Name="WaitingProgressRing" Width="28" Height="28" IsActive="True" />
+                                <TextBlock Foreground="White" Text="Waiting for the first complete light frame…" />
+                            </StackPanel>
+                        </Grid>
                     </Grid>
                 </Border>
 
@@ -447,9 +456,18 @@
                     <StackPanel Spacing="14">
                         <StackPanel x:Name="SessionGroupsPanel" Spacing="8" Visibility="Collapsed">
                             <TextBlock x:Name="SessionStatusText" TextWrapping="Wrap" />
+                            <ToggleSwitch x:Name="AllFiltersToggle" Header="Preview view" OffContent="Selected filter" OnContent="All filters" IsOn="True" Toggled="AllFilters_Toggled" />
                             <ComboBox x:Name="FilterGroupPicker" Header="Filter stack" HorizontalAlignment="Stretch" SelectionChanged="FilterGroup_SelectionChanged" />
-                            <TextBlock Text="All filters continue stacking while you view one. Snapshot and Finish apply to the selected filter; Pause saves the entire session." TextWrapping="Wrap" />
+                            <TextBlock Text="All filters continue stacking in either view. Select a tile or filter to inspect, save a snapshot, or finish that stack. Pause saves the entire session." TextWrapping="Wrap" />
+                            <Button Content="Combine saved color stacks…" Click="ColorStack_Click" />
+                            <TextBlock Text="Save snapshots for R, G and B first. Color composition requires stacks made with the same alignment reference." TextWrapping="Wrap" />
                         </StackPanel>
+                        <ComboBox x:Name="RunningStretchPicker" Header="Preview stretch (display only)" SelectedIndex="0"
+                            HorizontalAlignment="Stretch" SelectionChanged="RunningStretch_SelectionChanged">
+                            <ComboBoxItem Content="Auto MTF" Tag="AutoMtf" />
+                            <ComboBoxItem Content="Median Anchor" Tag="MedianAnchor" />
+                            <ComboBoxItem Content="Layered" Tag="Layered" />
+                        </ComboBox>
                         <Border
                             Padding="16"
                             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"

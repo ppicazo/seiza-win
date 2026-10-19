@@ -160,9 +160,9 @@ Windows CI.
     scene preparation, distance lookup, camera fitting, tours, labels and frame
     rendering. Windows owns native inspectors and bounded streaming MP4
     encoding through MediaStreamSource/MediaTranscoder; no pixel math is ported
-    to C#. The separate `seiza-platform` DLL adapts only focused catalog
-    status/setup through the published Rust download APIs, not a fork of the
-    shared C ABI. Core/C ABI 0.38.0 and parallax 0.15.0 come from published
+    to C#. The separate `seiza-platform` DLL adapts focused catalog
+    status/setup and file-based color calibration through published Rust APIs,
+    not a fork of the shared C ABI. Core/C ABI 0.39.0 and parallax 0.16.0 come from published
     crates, with the upstream font notice included in the app. See
     [Parallax video](PARALLAX-VIDEO.md).
 19. Multi-filter live sessions own one existing live coordinator/native handle
@@ -175,6 +175,55 @@ Windows CI.
     groups, not just the selected one. A failed filter does not stop discovery
     or ingestion in the others. RC-Astro's executable path is a persistent user
     setting, observed by each open Parallax session.
+    The live overview projects every group's current snapshot into stable,
+    keyboard-accessible tiles. It reuses bounded native previews without extra
+    rendering jobs, uploads only changed images, and releases tile GPU resources
+    when returning to the individual view or closing. Layout and presentation
+    never alter accumulator state or the selected filter's export scope.
+    Live stretch changes use each coordinator's operation gate and redraw even
+    when paused; newly discovered groups inherit the session's current recipe.
+    A serialized registry publication is flushed before a completed child's
+    checkpoint is retired. Failed publication leaves that checkpoint recoverable.
+    Export preflight and final publication check all groups' inputs/calibration,
+    the complete capture/checkpoint trees, resolved paths and hard-link aliases.
+    Calibration preparation errors stop just the affected filter without counting
+    readable lights as unreadable or automatically repeating a declined review.
+    RC-Astro changes coalesce until the receiving Parallax window has no active
+    native operations, frame renders or refits, preserving those operations' inputs.
+20. RGB/LRGB file composition uses the shared C ABI; Windows requires explicit
+    confirmation of a common alignment grid. The small platform color adapter
+    reads linear FITS/XISF, calls `seiza-stacking` Gaia calibration, and writes
+    linear output with the native WCS and `SEIZAPCC=GAIA` marker. It owns no
+    photometry or pixel algorithms. Full-resolution pixels stay in Rust.
+    Windows owns optional solve verification, serialized jobs, same-volume
+    staging, source identity checks, final publication and result presentation.
+    Skips and failures never replace the destination. Marked results convert
+    unlinked display stages to linked stages for both BGRA8 and RGBA16 renders.
+    Platform-returned strings use `seiza_win_string_free`, never the core DLL's
+    allocator. Optional photometry installation requires an explicit action.
+21. Learned sensor defects use the native detection ABI with at least three
+    compatible dithered lights, never a master dark. A live filter waits until
+    enough stable lights exist, then fixes the map for its entire accumulator.
+    Native checkpoint restore retains that map independently of source files;
+    no resumed stack relearns it. The manifest separately records the learning
+    policy, and learned stacks reject calibration swaps to prevent applying a
+    learned correction on top of a new dark or different bias/flat. Master-cache fingerprints use the native
+    stacking-output version (the legacy manifest field remains `CoreVersion`).
+    Output-version pointers are static and must not be freed.
+22. Optional flat quality review passes the native metadata planner's exact
+    selected raw paths to `seiza_calibration_measure_flat_json` and sends complete
+    typed measurements back to `seiza_calibration_screen_flats_json`. No quality
+    thresholds, pixel measurements, dust geometry or selection decisions are
+    implemented in C#. Review runs independently of master-cache hits, one native
+    frame at a time behind a shared gate, with identity and cancellation checks
+    before publication. Failure produces an explicit warning, not a partial
+    passing report. Quality options do not change master cache fingerprints.
+    Windows owns report presentation, expandable details, complete clipboard
+    reports and explicit continue/cancel. New live filter groups await review
+    separately; dialogs are serialized and cancellation/close releases waits.
+    Checkpoint resume retains its prior calibration rather than requiring raw
+    frames again. Native master predictions remain distinct from actual built
+    master findings and existing preparation warnings.
 
 ## Performance rules
 

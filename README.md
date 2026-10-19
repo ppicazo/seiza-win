@@ -93,8 +93,8 @@ See the [Windows parallax guide](docs/PARALLAX-VIDEO.md) for layer requirements,
 camera and tour controls, encoder availability and export limits. Windows
 0.8.4 uses published Seiza/C ABI 0.33.0, stacking 0.36.0, parallax 0.10.0 and
 image-io 0.8.0 crates, without vendored patches.
-Development builds now use Seiza/C ABI 0.38.0, stacking 0.41.0, parallax
-0.15.0, image-io 0.9.0, and stretch 0.3.0 from published crates.
+Development builds now use Seiza/C ABI 0.39.0, stacking 0.42.0, parallax
+0.16.0, image-io 0.9.0, and stretch 0.3.1 from published crates.
 
 ## Image viewing and folder review
 
@@ -289,6 +289,76 @@ without a Windows restart.
 | --- | --- |
 | ![Autostretched FITS content thumbnails in Windows File Explorer](docs/images/explorer-fits-thumbnails.png) | ![Mono and color XISF content thumbnails in Windows File Explorer](docs/images/explorer-xisf-thumbnails.png) |
 
+## Color stacking and calibration (development builds)
+
+Open **Color stacking** from the main toolbar to combine linear R, G and B
+stacks, optionally with luminance, or calibrate an existing RGB/OSC stack.
+Channel stacks must already share an alignment reference and pixel grid;
+matching dimensions alone are not enough. Save stable snapshots from each
+live filter stack first. Composition does not perform another registration.
+
+Gaia calibration is intended for broadband color, not narrowband palettes.
+The dialog can explicitly download the offline Gaia photometry catalog into
+the configured catalog directory. The default workflow solves/verifies the
+composed image using your solve catalogs, then performs native photometric
+calibration before any display stretch. Turning verification off uses the
+image's existing WCS. Missing catalogs, insufficient stars and other skipped
+outcomes are reported without publishing a partial result.
+
+Results are separate linear FITS or XISF files; source stacks are never
+modified. Output is staged beside the destination and published only on
+success. Calibrated files retain their WCS and a `SEIZAPCC=GAIA` marker.
+Seiza uses linked RGB or luminance-preserving stretches for marked files on
+reopen, preview and display export, keeping their calibrated color balance.
+An already marked image cannot be calibrated again; use its original stack.
+
+Directory and live stacking also offer **Learn sensor defects from dithered
+lights (no master dark)**. This opt-in native hot/dead-pixel map needs at least
+three compatible lights and actual dithering or drift; stationary stars can
+otherwise resemble persistent sensor defects. Do not enable it with a master
+dark. Live stacks wait for three compatible frames per filter, learn once,
+and retain that fixed map in their checkpoint, including after restart without
+the original captures. Changing this policy or its calibration masters requires
+a new stack, so a learned correction cannot be combined with a new dark.
+
+Calibration-master caches use the native stacking-output version, so unrelated
+core releases no longer force identical masters to be rebuilt.
+
+## Flat quality review (development builds)
+
+In directory or live stacking, choose automatic calibration and enable
+**Review flat quality before stacking**. This follows the workflow in
+[Mac #76](https://github.com/theatrus/seiza-mac/pull/76): native Seiza measures
+the exact selected raw flats, even when the master is reused from cache.
+The Calibration Review dialog shows reviewed/suspect/poor counts, individual
+flagged frames, preparation warnings, and a separate combined-master prediction.
+Continue keeps the same selection; Cancel stops before processing lights.
+There is no automatic exclusion, reordering, or replacement of flats.
+
+Set **Saturation level** to the file's raw units (commonly 65535 for 16-bit ADU
+or 1 for normalized samples). Optional **Estimate dust distance** needs focal
+ratio, pixel size after camera binning, and obstruction diameter as a percentage
+of the aperture. For 3.76 µm pixels with 2×2 binning, enter 7.52 µm. Distances are
+estimates, not identification of a dirty surface. Steady dust is what flats
+correct; vignetting is reported separately, and detection counts across frames
+are not counts of unique particles.
+
+Expand **Dust and vignetting details** for more information. The first ten
+flagged frames appear initially; **Show all** reveals the rest. **Copy Report**
+always includes every finding, native value/limit, illumination grid and feature
+geometry, including collapsed details. The combined-master verdict predicts the
+selected set; it does not measure the built master or determine which flat
+session best matches a light. Existing metadata and pedestal safety gates remain
+in force.
+
+Multi-filter live sessions review each new filter before it starts ingestion.
+Cancelling one filter's review leaves other filters running; pause/resume the
+session to retry. Restored checkpoints retain their existing calibration and do
+not invoke a new raw-flat review. Reviews are not cached or persisted. Failed
+reviews show an explicit incomplete-review warning, never a passing partial
+result. Cancellation waits for the current native measurement to return and
+discards the result; source identities are checked around the whole review.
+
 ## Directory image stacking
 
 - Directory image stacking registers and combines selected FITS or XISF
@@ -354,6 +424,18 @@ in one session. New filter groups appear automatically as captures arrive;
 an idle L stack does not prevent R from updating. Filter identity comes from
 the image header, falling back to recognized filename tokens, not arbitrary
 folder names. Files with neither are grouped as **Unfiltered**.
+
+The **All filters** overview shows every discovered filter's latest preview,
+frame counts and status together, including waiting, paused and failed stacks.
+Tiles reflow as the window resizes and scroll for larger sessions. Select a tile
+or use the filter picker to open its detailed preview and SNR chart; switch back
+with the **Preview view** toggle. Snapshot and Finish require an individual
+filter view, while Pause and save always applies to the whole session.
+
+Change **Preview stretch (display only)** while running or paused to compare Auto
+MTF, Median Anchor and Layered across all filters. New filters inherit the current
+choice. These redraws never change the integrated linear pixels or exported FITS;
+Layered defaults to linked color so both mono and RGB stacks work.
 
 Seiza waits until each FITS or XISF file has stopped changing, checks
 that it is a raw, compatible light frame, revalidates it against the active

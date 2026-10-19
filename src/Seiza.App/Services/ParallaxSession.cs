@@ -32,6 +32,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     private CancellationTokenSource? _operation, _refit, _playback;
     private Task? _refitTask, _frameTask;
     private int _revision, _frameRevision, _activeJobs, _catalogStatusRevision;
+    private readonly DeferredSettingsUpdate _rcAstroSettingsUpdate = new();
     private int? _pendingFrame;
     private bool _closed, _refitRequested, _automaticPreview = true, _layersAligned = true, _automaticSeparation, _sourceIsStarless;
     private double _playhead;
@@ -137,10 +138,19 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
     private void RcAstroExecutableChanged(object? sender, EventArgs e) => _dispatcher.TryEnqueue(() =>
     {
         if (_closed) return;
+        _rcAstroSettingsUpdate.Request();
+        ApplyPendingRcAstroSettings();
+    });
+
+    private void ApplyPendingRcAstroSettings()
+    {
+        // Keep active native handles and their inputs unchanged until all work,
+        // including frame rendering and refits, has finished. Coalesce changes.
+        if (!_rcAstroSettingsUpdate.TryTake(_closed, IsBusy, _activeJobs)) return;
         LoadRcAstroExecutable();
         Invalidate(true);
         Notify();
-    });
+    }
 
     public async Task InitializeAsync()
     {
@@ -849,7 +859,7 @@ internal sealed class ParallaxSession : INotifyPropertyChanged, IDisposable
         TryCleanup();
     }
     public void Dispose() { Close(); GC.SuppressFinalize(this); }
-    private void JobFinished() { _activeJobs--; TryCleanup(); }
+    private void JobFinished() { _activeJobs--; ApplyPendingRcAstroSettings(); TryCleanup(); }
     private void TryCleanup()
     {
         if (!_closed || _activeJobs != 0) return;

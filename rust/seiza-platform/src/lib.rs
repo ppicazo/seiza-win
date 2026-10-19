@@ -2,6 +2,7 @@
 //! currently offers distances only as part of Everything; transfer, cache,
 //! hashing and atomic installation still come from seiza-download.
 use seiza::catalog::{ObjectDistances, StarDistanceCatalog};
+mod color;
 use seiza::objects::ObjectCatalog;
 use seiza_download::{
     CachePolicy, CatalogBundle, CatalogManager, CatalogSet, Dataset, DownloadEvent,
@@ -333,7 +334,7 @@ fn boundary<T>(
         unsafe { *error_out = std::ptr::null_mut() };
     }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation))
-        .unwrap_or_else(|_| Err("Catalogue operation failed unexpectedly".into()));
+        .unwrap_or_else(|_| Err("Native operation failed unexpectedly".into()));
     match result {
         Ok(value) => Some(value),
         Err(error) => {
@@ -383,6 +384,16 @@ pub unsafe extern "C" fn seiza_win_catalog_setup_parallax(
         install(&directory, callback, context as usize)
     })
     .is_some()
+}
+
+/// Releases strings allocated by this Windows adapter (never by seiza-cabi).
+/// # Safety
+/// `value` is null or a pointer returned by this adapter, released exactly once.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn seiza_win_string_free(value: *mut c_char) {
+    if !value.is_null() {
+        drop(unsafe { CString::from_raw(value) });
+    }
 }
 
 #[cfg(test)]
@@ -888,15 +899,5 @@ mod tests {
             );
             assert_eq!(std::fs::read(&artifact.path).unwrap(), corrupt);
         });
-    }
-}
-
-/// Releases strings allocated by this Windows adapter (never by seiza-cabi).
-/// # Safety
-/// `value` is null or a pointer returned by this adapter, released exactly once.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn seiza_win_string_free(value: *mut c_char) {
-    if !value.is_null() {
-        drop(unsafe { CString::from_raw(value) });
     }
 }

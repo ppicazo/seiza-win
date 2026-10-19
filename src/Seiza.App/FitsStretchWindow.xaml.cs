@@ -19,10 +19,8 @@ public sealed partial class FitsStretchWindow : Window
             .Select(type => new StretchTypeChoice(type, type.Title()))
             .ToArray();
 
-    private static readonly ColorStrategyChoice[] ColorStrategies =
-        Enum.GetValues<FitsStretchColorStrategy>()
-            .Select(strategy => new ColorStrategyChoice(strategy, strategy.Title()))
-            .ToArray();
+    private readonly ColorStrategyChoice[] _colorStrategies;
+    private readonly bool _preserveColor;
 
     private static readonly BackgroundModeChoice[] BackgroundModes =
         Enum.GetValues<FitsBackgroundCorrectionMode>()
@@ -51,9 +49,14 @@ public sealed partial class FitsStretchWindow : Window
         FitsStretchStack stack,
         FitsBackgroundConfiguration? background,
         FitsDeconvolutionConfiguration? deconvolution,
-        bool supportsColor)
+        bool supportsColor,
+        bool preserveColor = false)
     {
         InitializeComponent();
+        _preserveColor = preserveColor;
+        _colorStrategies = Enum.GetValues<FitsStretchColorStrategy>()
+            .Where(strategy => !preserveColor || strategy != FitsStretchColorStrategy.Unlinked)
+            .Select(strategy => new ColorStrategyChoice(strategy, strategy.Title())).ToArray();
         _stages = stack.Stages.Select(stage => stage.Clone()).ToList();
         _background = background?.Clone();
         _retainedBackground = _background?.Clone() ?? new FitsBackgroundConfiguration();
@@ -74,7 +77,7 @@ public sealed partial class FitsStretchWindow : Window
         Closed += Window_Closed;
 
         MethodPicker.ItemsSource = StretchTypes;
-        ColorStrategyPicker.ItemsSource = ColorStrategies;
+        ColorStrategyPicker.ItemsSource = _colorStrategies;
         _isUpdating = true;
         BackgroundToggle.IsOn = _background is not null;
         DeconvolutionToggle.IsOn = _deconvolution is not null;
@@ -120,6 +123,9 @@ public sealed partial class FitsStretchWindow : Window
         _isUpdating = true;
         try
         {
+            if (_preserveColor)
+                foreach (var stage in _stages)
+                    if (stage.ColorStrategy == FitsStretchColorStrategy.Unlinked) stage.ColorStrategy = FitsStretchColorStrategy.Linked;
             StagePicker.ItemsSource = _stages
                 .Select((stage, index) => $"{index + 1}. {stage.Type.Title()}")
                 .ToArray();
@@ -133,9 +139,9 @@ public sealed partial class FitsStretchWindow : Window
                 item => item.Type == Configuration.Type);
             MethodHelpText.Text = Configuration.Type.Help();
             ColorStrategyPicker.SelectedIndex = Array.FindIndex(
-                ColorStrategies,
+                _colorStrategies,
                 item => item.Strategy == Configuration.ColorStrategy);
-            ColorHelpText.Text = Configuration.ColorStrategy.Help();
+            ColorHelpText.Text = ColorHelp();
             BuildParameterControls();
             BuildBackgroundControls();
             BuildDeconvolutionControls();
@@ -747,7 +753,7 @@ public sealed partial class FitsStretchWindow : Window
         }
         Configuration.Type = choice.Type;
         if (choice.Type == FitsStretchType.Layered)
-            Configuration.ColorStrategy = FitsStretchColorStrategy.LuminancePreserving;
+            Configuration.ColorStrategy = FitsStretchColorStrategy.Linked;
         if (choice.Type == FitsStretchType.MedianAnchor)
             Configuration.TargetMedian = 0.25;
         RefreshEditor();
@@ -763,12 +769,15 @@ public sealed partial class FitsStretchWindow : Window
         Configuration.ColorStrategy = choice.Strategy;
         if (Configuration.Type == FitsStretchType.Layered && choice.Strategy == FitsStretchColorStrategy.Unlinked)
         {
-            Configuration.ColorStrategy = FitsStretchColorStrategy.LuminancePreserving;
+            Configuration.ColorStrategy = FitsStretchColorStrategy.Linked;
             RefreshEditor();
         }
-        ColorHelpText.Text = Configuration.ColorStrategy.Help();
+        ColorHelpText.Text = ColorHelp();
         DraftChanged();
     }
+
+    private string ColorHelp() => Configuration.ColorStrategy.Help() +
+        (_preserveColor ? " Gaia-calibrated image: unlinked RGB stretches are disabled to preserve its color balance." : "");
 
     private void BackgroundToggle_Toggled(object sender, RoutedEventArgs e)
     {

@@ -167,12 +167,14 @@ internal sealed record LiveStackRunConfiguration
     public string WatchFolder { get; init; } = string.Empty;
     public static string PreviewProcessingJsonFor(FitsStretchType type)
     {
+        if (type is not (FitsStretchType.AutoMtf or FitsStretchType.MedianAnchor or FitsStretchType.Layered))
+            throw new ArgumentOutOfRangeException(nameof(type));
         var stage = new FitsStretchConfiguration
         {
             Type = type,
             TargetMedian = type == FitsStretchType.MedianAnchor ? 0.25 : 0.2,
             ColorStrategy = type == FitsStretchType.Layered
-                ? FitsStretchColorStrategy.LuminancePreserving : FitsStretchColorStrategy.Unlinked,
+                ? FitsStretchColorStrategy.Linked : FitsStretchColorStrategy.Unlinked,
         };
         var processing = new FitsImageProcessingConfiguration(new FitsStretchStack([stage]), null);
         var root = System.Text.Json.Nodes.JsonNode.Parse(DefaultPreviewProcessingJson)!;

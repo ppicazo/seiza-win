@@ -11,10 +11,18 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\Seiza.App\Models\LiveStackOverviewItem.cs" Link="Models\LiveStackOverviewItem.cs" />
+    <Compile Include="..\..\src\Seiza.App\Models\DeferredSettingsUpdate.cs" Link="Models\DeferredSettingsUpdate.cs" />
+    <Compile Include="..\..\src\Seiza.App\Models\FlatQuality.cs" Link="Models\FlatQuality.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\FlatQualityService.cs" Link="Services\FlatQualityService.cs" />
     <Content Include="$(SeizaNativeDll)" Condition="Exists('$(SeizaNativeDll)')">
       <Link>seiza_cabi.dll</Link>
       <!-- An explicit validation DLL may be older than the previous run's
            DLL. Always copy the selected bytes, not whichever timestamp wins. -->
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="$(RepositoryRoot)target\$(RustProfile)\seiza_platform.dll" Condition="Exists('$(RepositoryRoot)target\$(RustProfile)\seiza_platform.dll')">
+      <Link>seiza_platform.dll</Link>
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
@@ -53,6 +61,8 @@
     <Compile Include="..\..\src\Seiza.App\Models\StackAlignmentReference.cs" Link="Models\StackAlignmentReference.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\StackingCoreCapabilities.cs" Link="Services\StackingCoreCapabilities.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\StackReferenceService.cs" Link="Services\StackReferenceService.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\StackDefectService.cs" Link="Services\StackDefectService.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\ColorWorkflowService.cs" Link="Services\ColorWorkflowService.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\ImageStackSession.cs" Link="Models\ImageStackSession.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\ImageMetadata.cs" Link="Models\ImageMetadata.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\CatalogStatus.cs" Link="Models\CatalogStatus.cs" />

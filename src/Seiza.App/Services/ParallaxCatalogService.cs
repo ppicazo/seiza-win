@@ -13,6 +13,9 @@ internal static unsafe partial class ParallaxCatalogService
     [LibraryImport("seiza_platform", EntryPoint = "seiza_win_catalog_setup_parallax", StringMarshalling = StringMarshalling.Utf8)]
     [return: MarshalAs(UnmanagedType.I1)]
     private static partial bool Setup(string? directory, delegate* unmanaged[Cdecl]<nint, nint, void> callback, nint context, out nint error);
+    [LibraryImport("seiza_platform", EntryPoint = "seiza_win_catalog_setup_photometry", StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static partial bool SetupPhotometry(string? directory, delegate* unmanaged[Cdecl]<nint, nint, void> callback, nint context, out nint error);
     [LibraryImport("seiza_platform", EntryPoint = "seiza_win_string_free")]
     private static partial void Free(nint value);
 
@@ -41,6 +44,15 @@ internal static unsafe partial class ParallaxCatalogService
     {
         try { return new SeizaCoreException(Marshal.PtrToStringUTF8(error) ?? "Offline distance catalog operation failed."); }
         finally { if (error != 0) Free(error); }
+    }
+    public static void InstallPhotometry(string? directory, Action<CatalogSetupProgress> progress)
+    {
+        GCHandle context = GCHandle.Alloc(progress);
+        try
+        {
+            if (!SetupPhotometry(directory, &Callback, GCHandle.ToIntPtr(context), out nint error)) throw ReadError(error);
+        }
+        finally { context.Free(); }
     }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void Callback(nint json, nint context)

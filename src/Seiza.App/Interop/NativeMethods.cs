@@ -9,6 +9,10 @@ internal static partial class NativeMethods
     [LibraryImport(LibraryName, EntryPoint = "seiza_core_version")]
     internal static partial nint GetCoreVersion();
 
+    // Static strings owned by the DLL; never free these pointers.
+    [LibraryImport(LibraryName, EntryPoint = "seiza_stacking_output_version")]
+    internal static partial nint GetStackingOutputVersion();
+
     [LibraryImport(
         LibraryName,
         EntryPoint = "seiza_catalog_status_json",

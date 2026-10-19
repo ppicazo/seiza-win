@@ -82,12 +82,14 @@ internal static class ImageStackService
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Invoke(new ImageStackProgress(
             ImageStackProgressPhase.Preparing,
-            "Opening reference image…",
+            request.Options.LearnDefects ? "Learning sensor defects from dithered lights…" : "Opening reference image…",
             0,
             request.Inputs.Count,
             0,
             0));
 
+        ImageStackOptions preparedOptions = await StackDefectService.PrepareAsync(request.Inputs,
+            request.Options, request.Calibration, cancellationToken).ConfigureAwait(false);
         ImageStackSession opened;
         StackAlignmentReferenceSelection? referenceSelection = null;
         if (request.AlignmentReferencePath is string alignmentPath)
@@ -96,7 +98,7 @@ internal static class ImageStackService
                 alignmentPath,
                 request.ChannelReferenceCandidates.Count > 0
                     ? request.ChannelReferenceCandidates : [request.Inputs[0]],
-                request.Options,
+                preparedOptions,
                 request.Calibration,
                 cancellationToken).ConfigureAwait(false);
             opened = result.Session;
@@ -105,7 +107,7 @@ internal static class ImageStackService
         else
         {
             opened = await ImageStackSession.OpenAsync(
-                request.Inputs[0], request.Options, request.Calibration,
+                request.Inputs[0], preparedOptions, request.Calibration,
                 cancellationToken).ConfigureAwait(false);
         }
         await using ImageStackSession session = opened;
