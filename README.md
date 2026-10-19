@@ -8,8 +8,8 @@ a finished image into a camera tour with depth, motion, and titles. Seiza pairs
 a WinUI 3 interface and GPU-backed viewport with the shared
 [Seiza](https://github.com/theatrus/seiza) Rust imaging core.
 
-[Download Seiza for Windows 0.8.4 (x64)](https://github.com/theatrus/seiza-win/releases/download/v0.8.4/seiza-0.8.4-windows-x86_64.msi)
-· [0.8.4 release notes](docs/releases/v0.8.4.md)
+[Download Seiza for Windows 0.8.5 (x64)](https://github.com/theatrus/seiza-win/releases/download/v0.8.5/seiza-0.8.5-windows-x86_64.msi)
+· [0.8.5 release notes](docs/releases/v0.8.5.md)
 · [Previous versions](https://github.com/theatrus/seiza-win/releases)
 
 **Also from Seiza:** [Core, CLI, and libraries](https://github.com/theatrus/seiza) ·
@@ -91,9 +91,7 @@ or add a custom image-mask plane with an explicit name and distance.
 
 See the [Windows parallax guide](docs/PARALLAX-VIDEO.md) for layer requirements,
 camera and tour controls, encoder availability and export limits. Windows
-0.8.4 uses published Seiza/C ABI 0.33.0, stacking 0.36.0, parallax 0.10.0 and
-image-io 0.8.0 crates, without vendored patches.
-Development builds now use Seiza/C ABI 0.39.0, stacking 0.42.0, parallax
+0.8.5 uses Seiza/C ABI 0.39.0, stacking 0.42.0, parallax
 0.16.0, image-io 0.9.0, and stretch 0.3.1 from published crates.
 
 ## Image viewing and folder review
@@ -122,6 +120,23 @@ RGB histograms, searchable source headers, and processing provenance.
 | ![Native sidebar with nested relative paths, collapsible groups and synthetic sample thumbnails](docs/images/nested-browser/folder-path.png) | ![Native sidebar grouping synthetic sample images by filename filter, with relative labels distinguishing same-named files](docs/images/nested-browser/filter.png) |
 
 Native sidebar controls shown with synthetic sample images.
+
+## Seiza for Windows 0.8.5: multi-filter sessions, flat review and color stacking
+
+- Watch one parent **LIGHT** folder and run independent filter stacks as captures
+  arrive. View all filters together or select one for detailed inspection.
+- Change between Auto MTF, Median Anchor and Layered previews during a session,
+  including while paused, while keeping the linear stack unchanged.
+- Review flat illumination, clipping, dust and geometry before building masters;
+  inspect warnings and explicitly continue or cancel each calibration review.
+- Combine aligned saved channels into RGB or LRGB, with optional Gaia color
+  calibration, and learn fixed sensor defects from compatible dithered lights.
+- Choose RC-Astro once in Settings and reuse it across Parallax sessions. Changes
+  wait for current rendering work to finish. Browser grouping is remembered too.
+- Preserve completed-filter state durably and protect every filter's capture,
+  calibration and checkpoint files when saving results.
+
+See the [0.8.5 release notes](docs/releases/v0.8.5.md) for details.
 
 ## Seiza for Windows 0.8.4: framing, cropped dust and reliable pull-back
 
@@ -552,8 +567,8 @@ remaining macOS and Windows integration work.
 
 ## Install
 
-Download the [Seiza for Windows 0.8.4 x64 MSI](https://github.com/theatrus/seiza-win/releases/download/v0.8.4/seiza-0.8.4-windows-x86_64.msi).
-Its [SHA-256 checksums](https://github.com/theatrus/seiza-win/releases/download/v0.8.4/SHA256SUMS.txt)
+Download the [Seiza for Windows 0.8.5 x64 MSI](https://github.com/theatrus/seiza-win/releases/download/v0.8.5/seiza-0.8.5-windows-x86_64.msi).
+Its [SHA-256 checksums](https://github.com/theatrus/seiza-win/releases/download/v0.8.5/SHA256SUMS.txt)
 are published beside it. The installer places Seiza in
 `Program Files\Seiza for Windows` for every user, adds a shared Start Menu
 shortcut, and registers `.fit`, `.fits`, `.fts`, and `.xisf` with Windows
@@ -618,7 +633,7 @@ Build the self-contained all-users WiX MSI:
 ```powershell
 dotnet build packaging\windows\Seiza.App.wixproj `
   -c Release `
-  -p:SeizaVersion=0.8.4
+  -p:SeizaVersion=0.8.5
 ```
 
 The installer is written to `dist`. See the
