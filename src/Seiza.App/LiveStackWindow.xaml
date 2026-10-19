@@ -102,7 +102,7 @@
                             <TextBlock x:Name="AlignmentReferenceHelpText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                             <TextBlock
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="The first compatible light locks sensor identity and filter for this window. Files for other filters are ignored; use a separate capture folder for each simultaneous filter stack."
+                                Text="Separate stacks by filter creates an independent stack for each filter in this folder. When turned off, the first compatible light locks sensor identity and filter, and files for other filters are ignored."
                                 TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
