@@ -162,9 +162,16 @@ Windows CI.
     encoding through MediaStreamSource/MediaTranscoder; no pixel math is ported
     to C#. The separate `seiza-platform` DLL adapts focused catalog
     status/setup and file-based color calibration through published Rust APIs,
-    not a fork of the shared C ABI. Core/C ABI 0.39.0 and parallax 0.16.0 come from published
+    not a fork of the shared C ABI. Core/C ABI 0.40.1 and parallax 0.17.0 come from published
     crates, with the upstream font notice included in the app. See
     [Parallax video](PARALLAX-VIDEO.md).
+    Batch mosaics use the C ABI's expanded-canvas planner with all selected
+    lights, an explicit memory ceiling and a retained cancellation signal.
+    Planning starts empty: the anchor is pushed exactly once with every other
+    light. Windows displays native planning/lens notes and retains source
+    protection during reintegration/export. Live acquisition keeps a fixed
+    canvas. The 0.40 SNR ABI includes the appended bin-factor field; its managed
+    allocation must be 80 bytes on x64, not the old 72 bytes.
 19. Multi-filter live sessions own one existing live coordinator/native handle
     per canonical filter identity. Windows routes discovery and selects UI
     previews; Rust still performs all calibration, registration and accumulation.

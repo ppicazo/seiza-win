@@ -27,6 +27,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     private bool _initializing = true;
     private bool _loaded;
     private bool _running;
+    private bool _hasCustomOverlap;
     private string? _calibrationLibraryPath;
     private string? _alignmentReferencePath;
 
@@ -208,6 +209,21 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         }
     }
 
+    private void CanvasMode_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_initializing) return;
+        bool expanded = SelectedTag(CanvasModePicker) == "Expanded";
+        // Follow mode defaults only until the user explicitly edits overlap,
+        // even when that edit happens to equal another mode's default.
+        if (!_hasCustomOverlap)
+        {
+            _initializing = true;
+            try { MinimumOverlapBox.Value = expanded ? 0.05 : 0.60; }
+            finally { _initializing = false; }
+        }
+        UpdateOptionsAndValidation();
+    }
+
     private void Options_Changed(object sender, RoutedEventArgs e)
     {
         if (!_initializing)
@@ -220,6 +236,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     {
         if (!_initializing)
         {
+            if (ReferenceEquals(sender, MinimumOverlapBox)) _hasCustomOverlap = true;
             UpdateOptionsAndValidation();
         }
     }
@@ -234,9 +251,14 @@ public sealed partial class ImageStackWindow : Window, IDisposable
 
     private void UpdateOptionsAndValidation()
     {
+        bool expanded = SelectedTag(CanvasModePicker) == "Expanded";
+        MosaicOptionsPanel.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        MosaicQualityInfoBar.IsOpen = expanded && SelectedTag(NormalizationPicker) == "LocalBackground";
         ReferencePanel.Visibility = AutomaticReferenceToggle.IsOn ? Visibility.Collapsed : Visibility.Visible;
         SharedAlignmentPanel.Visibility = SharedAlignmentToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
-        FooterHintText.Text = SharedAlignmentToggle.IsOn
+        FooterHintText.Text = expanded
+            ? "All selected lights contribute, including the anchor; disconnected panels may be rejected."
+            : SharedAlignmentToggle.IsOn
             ? "Only selected light frames contribute to the stack; the alignment image supplies geometry only."
             : "The reference frame is included in the stack.";
         StackRejectionMode rejection = SelectedTag(RejectionPicker) == "None"
@@ -277,6 +299,13 @@ public sealed partial class ImageStackWindow : Window, IDisposable
 
     private string? ValidationMessage(ImageStackOptions options)
     {
+        if (options.CanvasMode == StackCanvasMode.Expanded)
+        {
+            if (!StackingCoreCapabilities.Current.SupportsExpandedCanvas)
+                return "Update Seiza to core 0.40.1 or later for expanded mosaic canvases.";
+            if (SharedAlignmentToggle.IsOn)
+                return "Turn off shared fixed alignment to plan an expanded mosaic canvas.";
+        }
         IReadOnlyList<string> selected = SelectedPaths;
         if (selected.Count < 2)
         {
@@ -314,6 +343,8 @@ public sealed partial class ImageStackWindow : Window, IDisposable
 
     private ImageStackOptions CreateOptions() => new()
     {
+        CanvasMode = SelectedTag(CanvasModePicker) == "Expanded" ? StackCanvasMode.Expanded : StackCanvasMode.Reference,
+        MaximumCanvasMegasamples = CheckedInt(CanvasLimitBox.Value),
         RegistrationModel = SelectedTag(RegistrationModelPicker) switch
         {
             "Affine" => StackRegistrationModel.Affine,

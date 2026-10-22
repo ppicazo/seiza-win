@@ -18,6 +18,7 @@ internal enum StackWeightingMode { Equal, InverseNoiseVariance }
 internal enum StackInterpolation { Bilinear, Lanczos3 }
 internal enum StackDemosaic { Vng, Mhc, Bilinear }
 internal enum StackCfaIntegration { Demosaic, BayerDrizzle }
+internal enum StackCanvasMode { Reference, Expanded }
 
 internal enum StackRejectionMode
 {
@@ -27,6 +28,10 @@ internal enum StackRejectionMode
 
 internal sealed class ImageStackOptions
 {
+    private double? _minimumOverlap;
+    // Host-side planning policy, not part of the native StackOptions JSON.
+    public StackCanvasMode CanvasMode { get; set; }
+    public int MaximumCanvasMegasamples { get; set; } = 256;
     public StackNormalizationMode Normalization { get; set; } = StackNormalizationMode.Global;
     public int LocalTileSize { get; set; } = 256;
     public StackRejectionMode Rejection { get; set; } = StackRejectionMode.DeltaSigma;
@@ -36,7 +41,11 @@ internal sealed class ImageStackOptions
     public double MaximumRegistrationRms { get; set; } = 2.0;
     public double MaximumDriftPixels { get; set; } = 256.0;
     public double MaximumDriftFraction { get; set; } = 0.15;
-    public double MinimumOverlap { get; set; } = 0.60;
+    public double MinimumOverlap
+    {
+        get => _minimumOverlap ?? (CanvasMode == StackCanvasMode.Expanded ? 0.05 : 0.60);
+        set => _minimumOverlap = value;
+    }
     public StackRegistrationModel RegistrationModel { get; set; } = StackRegistrationModel.Similarity;
     public StackWeightingMode Weighting { get; set; } = StackWeightingMode.Equal;
     public double MinimumWeight { get; set; } = 0.05;
@@ -76,12 +85,20 @@ internal sealed class ImageStackOptions
     {
         get
         {
-            if (!Enum.IsDefined(Normalization) || !Enum.IsDefined(Rejection) ||
+            if (!Enum.IsDefined(CanvasMode) || !Enum.IsDefined(Normalization) || !Enum.IsDefined(Rejection) ||
                 !Enum.IsDefined(RegistrationModel) || !Enum.IsDefined(Weighting) ||
                 !Enum.IsDefined(Interpolation) || !Enum.IsDefined(Demosaic) ||
                 !Enum.IsDefined(CfaIntegration))
             {
                 return "Choose a supported stacking option.";
+            }
+            if (CanvasMode == StackCanvasMode.Expanded && MaximumCanvasMegasamples is < 1 or > 1024)
+            {
+                return "Choose a canvas limit between 1 and 1024 million samples.";
+            }
+            if (CanvasMode == StackCanvasMode.Expanded && CfaIntegration == StackCfaIntegration.BayerDrizzle)
+            {
+                return "Expanded mosaic canvases do not support Bayer drizzle. Choose demosaiced integration.";
             }
             if (Normalization is StackNormalizationMode.Local or StackNormalizationMode.LocalBackground &&
                 LocalTileSize < 16)
@@ -512,6 +529,10 @@ internal static class ImageStackValidation
 
     private static void ValidateRequest(ImageStackRequest request)
     {
+        if (request.Options.CanvasMode == StackCanvasMode.Expanded && request.AlignmentReferencePath is not null)
+        {
+            throw new ArgumentException("Expanded mosaics cannot use a shared fixed alignment image.", nameof(request));
+        }
         if (request.Inputs.Count < 2)
         {
             throw new ArgumentException("Choose at least two images to stack.", nameof(request));
@@ -645,7 +666,8 @@ internal sealed record ImageStackResult(
     StackSnrAnalysis SnrAnalysis,
     string? SnrWarning,
     string? TransientRemovalNote = null,
-    StackAlignmentReferenceSelection? ReferenceSelection = null);
+    StackAlignmentReferenceSelection? ReferenceSelection = null,
+    string? CanvasNote = null);
 
 internal sealed record ImageStackBatchResult(IReadOnlyList<ImageStackResult> Results)
 {

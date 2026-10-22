@@ -127,6 +127,23 @@
                                     <ColumnDefinition Width="160" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
+                                <TextBlock Text="Canvas" VerticalAlignment="Center" />
+                                <ComboBox x:Name="CanvasModePicker" Grid.Column="1" AutomationProperties.Name="Stack canvas" HorizontalAlignment="Stretch" SelectionChanged="CanvasMode_Changed">
+                                    <ComboBoxItem Content="Fixed reference frame" Tag="Reference" IsSelected="True" />
+                                    <ComboBoxItem Content="Expanded mosaic / dithered edges" Tag="Expanded" />
+                                </ComboBox>
+                            </Grid>
+                            <StackPanel x:Name="MosaicOptionsPanel" Visibility="Collapsed" Spacing="8">
+                                <InfoBar x:Name="MosaicQualityInfoBar" IsOpen="False" IsClosable="False" Severity="Warning" Message="Published stacking 0.43.0 can leave patchy backgrounds in expanded Local background mode. Choose another normalization mode or wait for the published upstream fix (#338)." />
+                                <NumberBox x:Name="CanvasLimitBox" Header="Maximum canvas (million samples, pixels × channels)" Minimum="1" Maximum="1024" SmallChange="16" Value="256" ValueChanged="Options_ValueChanged" />
+                                <TextBlock Text="Plans overlapping panels together, including panels connected through other panels. Every selected light is pushed, including the anchor. Live acquisition uses a fixed canvas." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <TextBlock Text="Memory can peak near 40 bytes per sample: a 256-million-sample limit permits about 10 GB. Disconnected lights are reported, not silently included. Bayer drizzle and shared fixed alignment are unavailable on expanded canvases." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="160" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
                                 <TextBlock Text="Registration model" VerticalAlignment="Center" />
                                 <ComboBox x:Name="RegistrationModelPicker" Grid.Column="1" AutomationProperties.Name="Registration model" HorizontalAlignment="Stretch" SelectionChanged="OptionsSelection_Changed" ToolTipService.ToolTip="Similarity fits shift, rotation, and scale. Affine adds shear; quadratic follows field distortion. Sparse matches fall back to similarity.">
                                     <ComboBoxItem Content="Similarity" Tag="Similarity" IsSelected="True" />

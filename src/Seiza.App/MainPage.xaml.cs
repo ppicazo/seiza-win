@@ -221,6 +221,14 @@ public sealed partial class MainPage : Page, IDisposable
                         TextWrapping = TextWrapping.Wrap,
                     });
                 }
+                foreach (ImageStackResult item in result.Results.Where(item => item.CanvasNote is not null))
+                {
+                    content.Children.Add(new TextBlock
+                    {
+                        Text = $"{Path.GetFileName(item.OutputPath)}: {item.CanvasNote}",
+                        TextWrapping = TextWrapping.Wrap,
+                    });
+                }
                 string[] transientNotes = result.Results
                     .Where(item => item.TransientRemovalNote is not null)
                     .Select(item => result.Results.Count == 1
