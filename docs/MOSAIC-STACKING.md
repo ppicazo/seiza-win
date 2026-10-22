@@ -42,6 +42,13 @@ new UI controls in this change.
 
 ![Native Windows expanded mosaic canvas controls, showing an example 32-million-sample ceiling](images/mosaic-stacking/canvas.png)
 
+![Four-panel synthetic mosaic output rendered by Seiza](images/mosaic-stacking/example-result.png)
+
+Synthetic demonstration: four overlapping 480 × 360 FITS panels containing
+procedural stars and diffuse emission were integrated by the production batch
+stacker into a 760 × 541 canvas (four accepted, zero rejected). This is generated
+test data, not an observed sky image; the result uses Seiza's normal image renderer.
+
 ## Faster solver: measured against 0.39.0
 
 The existing bounded image-solve entry point now uses Seiza's shared image-file
