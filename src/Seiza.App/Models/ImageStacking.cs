@@ -380,8 +380,11 @@ internal sealed record ImageStackGroup(
     ImageFilenameFilter? Filter,
     IReadOnlyList<string> Inputs)
 {
-    public string Title => Filter?.Title ?? (Id == "all" ? "All frames" : "Other");
-    public string FilenameSuffix => Filter?.FilenameSuffix ?? "Other";
+    public string? FieldTitle { get; init; }
+    public string Title => FieldTitle is null ? Filter?.Title ?? (Id == "all" ? "All frames" : "Other")
+        : Filter is null ? FieldTitle : $"{FieldTitle} · {Filter.Title}";
+    public string FilenameSuffix => FieldTitle is null ? Filter?.FilenameSuffix ?? "Other"
+        : Filter is null ? FieldTitle : $"{FieldTitle}-{Filter.FilenameSuffix}";
 }
 
 internal static class ImageStackGrouping

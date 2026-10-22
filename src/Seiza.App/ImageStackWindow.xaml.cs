@@ -28,6 +28,12 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     private bool _loaded;
     private bool _running;
     private bool _hasCustomOverlap;
+    private SkyPanelAnalysis? _skyAnalysis;
+    private IReadOnlyList<string>? _skyInputs;
+    private bool _solvingPanels;
+    private bool _updatingPanelSelection;
+    private readonly Dictionary<string, CheckBox> _skyFrameChecks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<(CheckBox Check, IReadOnlyList<string> Paths)> _skyPanelChecks = [];
     private string? _calibrationLibraryPath;
     private string? _alignmentReferencePath;
 
@@ -82,7 +88,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         .Select(frame => frame.Path)
         .ToArray();
 
-    private bool SplitsOutput => SplitByFilterToggle.IsOn && _groups.Count > 1;
+    private bool SplitsOutput => _groups.Count > 1;
 
     private void ContentRoot_Loaded(object sender, RoutedEventArgs e)
     {
@@ -104,8 +110,10 @@ public sealed partial class ImageStackWindow : Window, IDisposable
 
     private void SelectAll_Click(object sender, RoutedEventArgs e)
     {
+        if (_skyAnalysis is not null) { SelectSkyPaths(_skyAnalysis.Sources.Keys.ToArray(), true); return; }
         foreach (StackFrameChoice frame in _frames)
         {
+            if (_skyAnalysis is not null && !_skyAnalysis.Sources.ContainsKey(frame.Path)) continue;
             if (!FrameList.SelectedItems.Contains(frame))
             {
                 FrameList.SelectedItems.Add(frame);
@@ -121,6 +129,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         if (!_initializing)
         {
             RefreshGroupsAndValidation();
+            SyncSkySelection();
         }
     }
 
@@ -132,22 +141,187 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         }
     }
 
+    private void SkyGrouping_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_initializing) return;
+        _skyAnalysis = null;
+        _skyInputs = null;
+        _skyFrameChecks.Clear();
+        _skyPanelChecks.Clear();
+        SkyPanelReview.Children.Clear();
+        SkyPanelReview.Visibility = Visibility.Collapsed;
+        FrameList.Visibility = Visibility.Visible;
+        LightSelectionTitle.Text = "Light frames — select inputs";
+        SkyGroupingControls.Visibility = SkyGroupingToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        SkyGroupingStatus.Text = "Uses your installed plate-solving catalogs. No source files are changed.";
+        SolvePanelsButton.Content = "Solve and group selected lights";
+        RefreshGroupsAndValidation();
+    }
+
+    private async void SolvePanels_Click(object sender, RoutedEventArgs e)
+    {
+        if (_running || _closed) return;
+        string[] paths = (_skyInputs ?? SelectedPaths).ToArray();
+        _solvingPanels = _running = true;
+        ConfigurationHost.IsEnabled = false;
+        StartButton.IsEnabled = false;
+        var cancellation = new CancellationTokenSource();
+        _stackCancellation = cancellation;
+        try
+        {
+            var progress = new Progress<string>(message =>
+            {
+                if (!_closed && _solvingPanels) SkyGroupingStatus.Text = message;
+            });
+            SkyPanelAnalysis analysis = await SkyPanelService.AnalyzeAsync(paths,
+                CatalogSettingsStore.LoadCatalogDirectory(), progress, cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            ApplySkyAnalysis(analysis, paths);
+        }
+        catch (OperationCanceledException)
+        { SkyGroupingStatus.Text = "Solving cancelled. No partial grouping was applied; no files were changed."; }
+        catch (Exception exception)
+        { SkyGroupingStatus.Text = exception.Message; }
+        finally
+        {
+            _solvingPanels = _running = false;
+            ConfigurationHost.IsEnabled = true;
+            CancelButton.IsEnabled = true;
+            if (ReferenceEquals(_stackCancellation, cancellation)) _stackCancellation = null;
+            cancellation.Dispose();
+            RefreshGroupsAndValidation();
+            if (_closeWhenIdle && !_closed) { _allowClose = true; Close(); }
+        }
+    }
+
+    private void ApplySkyAnalysis(SkyPanelAnalysis analysis, IReadOnlyList<string> inputs)
+    {
+        _skyAnalysis = analysis;
+        _skyInputs = inputs;
+        SolvePanelsButton.Content = "Re-solve inputs and reset panel selection";
+        // Applying a complete analysis is atomic: cancellation never leaves a
+        // partially solved selection eligible for stacking.
+        _initializing = true;
+        try
+        {
+            FrameList.SelectedItems.Clear();
+            foreach (StackFrameChoice frame in _frames)
+                if (analysis.Sources.ContainsKey(frame.Path)) FrameList.SelectedItems.Add(frame);
+            CanvasModePicker.SelectedIndex = 1;
+            SharedAlignmentToggle.IsOn = false;
+            if (!_hasCustomOverlap) MinimumOverlapBox.Value = 0.05;
+        }
+        finally { _initializing = false; }
+        BuildSkyPanelReview();
+        RefreshGroupsAndValidation();
+    }
+
+    private void BuildSkyPanelReview()
+    {
+        SkyPanelReview.Children.Clear();
+        _skyFrameChecks.Clear();
+        _skyPanelChecks.Clear();
+        if (_skyAnalysis is null) return;
+        FrameList.Visibility = Visibility.Collapsed;
+        SkyPanelReview.Visibility = Visibility.Visible;
+        LightSelectionTitle.Text = "Select panels to include";
+        int fieldNumber = 0;
+        foreach (SkyField field in _skyAnalysis.Fields)
+        {
+            SkyPanelReview.Children.Add(new TextBlock { Text = $"Sky field {++fieldNumber} · {field.Panels.Count} panel(s)",
+                TextWrapping = TextWrapping.Wrap });
+            int panelNumber = 0;
+            foreach (SkyPanel panel in field.Panels)
+            {
+                var children = new StackPanel { Spacing = 4 };
+                foreach (SkySolvedFrame frame in panel.Frames)
+                {
+                    var check = new CheckBox { Content = new TextBlock
+                        {
+                            Text = ImageStackFrameLabel.DisplayName(frame.Path, _browserRoot),
+                            TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis,
+                        },
+                        IsChecked = true, HorizontalAlignment = HorizontalAlignment.Stretch };
+                    ToolTipService.SetToolTip(check, frame.Path);
+                    check.Checked += (_, _) => SelectSkyPaths([frame.Path], true);
+                    check.Unchecked += (_, _) => SelectSkyPaths([frame.Path], false);
+                    _skyFrameChecks.Add(frame.Path, check);
+                    children.Children.Add(check);
+                }
+                string[] paths = panel.Frames.Select(f => f.Path).ToArray();
+                var selectPanel = new CheckBox { Content = $"Panel {++panelNumber} · {paths.Length} light(s) · {panel.Position}",
+                    IsChecked = true, HorizontalAlignment = HorizontalAlignment.Stretch };
+                selectPanel.Checked += (_, _) => SelectSkyPaths(paths, true);
+                selectPanel.Unchecked += (_, _) => SelectSkyPaths(paths, false);
+                _skyPanelChecks.Add((selectPanel, paths));
+                SkyPanelReview.Children.Add(new Expander { Header = selectPanel, Content = children,
+                    HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch });
+            }
+        }
+        if (_skyAnalysis.Failures.Count > 0)
+        {
+            var failures = new StackPanel { Spacing = 6 };
+            foreach (SkySolveFailure failure in _skyAnalysis.Failures)
+                failures.Children.Add(new TextBlock { Text = $"{ImageStackFrameLabel.DisplayName(failure.Path, _browserRoot)} — {failure.Reason}",
+                    TextWrapping = TextWrapping.Wrap });
+            SkyPanelReview.Children.Add(new Expander { Header = $"Excluded: {_skyAnalysis.Failures.Count} calibration / unsolved / unverified input(s)",
+                Content = failures, HorizontalAlignment = HorizontalAlignment.Stretch });
+        }
+        SkyGroupingStatus.Text = $"Solved {_skyAnalysis.Sources.Count}/{_skyInputs?.Count ?? 0} lights; {_skyAnalysis.Fields.Count} sky field(s). " +
+            "Check panels to include all their exposures; expand a panel to select individual lights. 85% overlap groups repeats, 5% connects panels. These are grouping estimates, not a guarantee of star registration.";
+        SyncSkySelection();
+    }
+
+    private void SelectSkyPaths(IReadOnlyList<string> paths, bool selected)
+    {
+        if (_updatingPanelSelection || _running) return;
+        _initializing = true;
+        try
+        {
+            var choices = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (StackFrameChoice frame in _frames.Where(frame => choices.Contains(frame.Path)))
+                if (selected) { if (!FrameList.SelectedItems.Contains(frame)) FrameList.SelectedItems.Add(frame); }
+                else FrameList.SelectedItems.Remove(frame);
+        }
+        finally { _initializing = false; }
+        SyncSkySelection();
+        RefreshGroupsAndValidation();
+    }
+
+    private void SyncSkySelection()
+    {
+        _updatingPanelSelection = true;
+        try
+        {
+            var selected = SelectedPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var (path, check) in _skyFrameChecks) check.IsChecked = selected.Contains(path);
+            foreach (var (check, paths) in _skyPanelChecks)
+            {
+                int count = paths.Count(selected.Contains);
+                check.IsChecked = count == 0 ? false : count == paths.Count ? true : null;
+            }
+        }
+        finally { _updatingPanelSelection = false; }
+    }
+
     private void RefreshGroupsAndValidation()
     {
         IReadOnlyList<string> selected = SelectedPaths;
         bool hasMultipleFilters = ImageStackGrouping.HasMultipleDetectedFilters(selected);
         SplitByFilterToggle.IsEnabled = hasMultipleFilters;
-        if (!hasMultipleFilters && SplitByFilterToggle.IsOn)
-        {
-            _initializing = true;
-            SplitByFilterToggle.IsOn = false;
-            _initializing = false;
-        }
+        // Keep the user's split preference while temporarily selecting no
+        // lights or one filter. All/None must not silently turn splitting off.
         FilterHintText.Text = hasMultipleFilters
             ? "Multiple filename filters were detected. Split mode creates one registered FITS stack for each filter."
             : "Include at least two detected filename filters to create separate filter stacks.";
 
-        _groups = ImageStackGrouping.Groups(selected, SplitByFilterToggle.IsOn);
+        _groups = SkyGroupingToggle.IsOn && _skyAnalysis is not null
+            ? _skyAnalysis.SelectedGroups(selected, SplitByFilterToggle.IsOn)
+            : ImageStackGrouping.Groups(selected, SplitByFilterToggle.IsOn);
+        SkyOutputSummary.Visibility = SkyGroupingToggle.IsOn && _skyAnalysis is not null ? Visibility.Visible : Visibility.Collapsed;
+        SkyOutputSummary.Text = $"{selected.Count} lights selected → {_groups.Count} output(s). " +
+            string.Join("; ", _groups.Take(8).Select(group => $"{group.Title}: {group.Inputs.Count} lights")) +
+            (_groups.Count > 8 ? "; …" : string.Empty) + ". Removing a connecting panel can split a sky field into separate outputs.";
         SplitOutputPanel.Visibility = SplitsOutput ? Visibility.Visible : Visibility.Collapsed;
         BuildReferenceControls();
         UpdateOptionsAndValidation();
@@ -253,7 +427,6 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     {
         bool expanded = SelectedTag(CanvasModePicker) == "Expanded";
         MosaicOptionsPanel.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-        MosaicQualityInfoBar.IsOpen = expanded && SelectedTag(NormalizationPicker) == "LocalBackground";
         ReferencePanel.Visibility = AutomaticReferenceToggle.IsOn ? Visibility.Collapsed : Visibility.Visible;
         SharedAlignmentPanel.Visibility = SharedAlignmentToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
         FooterHintText.Text = expanded
@@ -294,11 +467,18 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         ValidationInfoBar.Severity = InfoBarSeverity.Error;
         ValidationInfoBar.Message = message ?? string.Empty;
         ValidationInfoBar.IsOpen = message is not null;
-        StartButton.IsEnabled = !_running && message is null;
+        StartButton.IsEnabled = !_running && !_solvingPanels && message is null;
     }
 
     private string? ValidationMessage(ImageStackOptions options)
     {
+        if (SkyGroupingToggle.IsOn)
+        {
+            if (_skyAnalysis is null) return "Solve and review the selected panels before stacking, or switch to manual selection.";
+            if (SelectedPaths.Any(path => !_skyAnalysis.Sources.ContainsKey(path))) return "Only solved and verified lights can be included in automatic mode.";
+            if (options.CanvasMode != StackCanvasMode.Expanded) return "Coordinate-grouped panels require the expanded mosaic canvas.";
+            if (_groups.Count == 0) return "Select at least one solved panel.";
+        }
         if (options.CanvasMode == StackCanvasMode.Expanded)
         {
             if (!StackingCoreCapabilities.Current.SupportsExpandedCanvas)
@@ -313,7 +493,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         }
         if (_groups.Any(group => group.Inputs.Count < 2))
         {
-            return "Every filter stack needs at least two selected frames.";
+            return "Every sky field / filter output needs at least two selected light frames. Select more panels or deselect that field.";
         }
         if (SharedAlignmentToggle.IsOn && !StackingCoreCapabilities.Current.SupportsReferenceImage)
         {
@@ -517,7 +697,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
 
     private async void Start_Click(object sender, RoutedEventArgs e)
     {
-        if (_running || _closed)
+        if (_running || _solvingPanels || _closed)
         {
             return;
         }
@@ -576,6 +756,9 @@ public sealed partial class ImageStackWindow : Window, IDisposable
 
         try
         {
+            if (outputs.Values.Any(output => _frames.Any(frame => StackSourceIdentity.RefersToSameFile(output, frame.Path))))
+                throw new InvalidOperationException("An output cannot replace any input light, including excluded or unselected lights.");
+            await VerifySkySourcesAsync(cancellation.Token);
             _rankedReferencePaths.Clear();
             if (AutomaticReferenceToggle.IsOn)
             {
@@ -637,6 +820,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
             }
 
             StackProgressBar.IsIndeterminate = false;
+            await VerifySkySourcesAsync(cancellation.Token);
             ImageStackBatchResult result = await ImageStackService.StackBatchAsync(
                 jobs,
                 progress,
@@ -688,6 +872,16 @@ public sealed partial class ImageStackWindow : Window, IDisposable
                 Close();
             }
         }
+    }
+
+    private async Task VerifySkySourcesAsync(CancellationToken token)
+    {
+        if (!SkyGroupingToggle.IsOn || _skyAnalysis is null) return;
+        SkyPanelAnalysis analysis = _skyAnalysis;
+        string[] paths = _groups.SelectMany(group => group.Inputs).ToArray();
+        if (!await Task.Run(() => analysis.SourcesUnchanged(paths), token))
+            throw new IOException("A selected source changed after solving. Solve and group again before stacking.");
+        token.ThrowIfCancellationRequested();
     }
 
     private async Task<BatchCalibrationPreparation> PrepareCalibrationsAsync(

@@ -162,7 +162,7 @@ Windows CI.
     encoding through MediaStreamSource/MediaTranscoder; no pixel math is ported
     to C#. The separate `seiza-platform` DLL adapts focused catalog
     status/setup and file-based color calibration through published Rust APIs,
-    not a fork of the shared C ABI. Core/C ABI 0.40.1 and parallax 0.17.0 come from published
+    not a fork of the shared C ABI. Core/C ABI 0.41.0 and parallax 0.18.0 come from published
     crates, with the upstream font notice included in the app. See
     [Parallax video](PARALLAX-VIDEO.md).
     Batch mosaics use the C ABI's expanded-canvas planner with all selected
@@ -172,6 +172,14 @@ Windows CI.
     protection during reintegration/export. Live acquisition keeps a fixed
     canvas. The 0.40 SNR ABI includes the appended bin-factor field; its managed
     allocation must be 80 bytes on x64, not the old 72 bytes.
+    Optional coordinate-based grouping solves raw lights through the same bounded
+    solver as the viewer. The platform adapter compares sampled sky footprints
+    using the published core's TAN/SIP transforms; Windows owns complete-link
+    repeated-pointing clusters, connected fields, filter partitions and native
+    panel/exposure checkboxes. Unverified solves and calibration frames are excluded.
+    Deselection recomputes connectivity, also within each filter; source stamps
+    invalidate changed selections before integration. This selects inputs only:
+    native star registration still determines actual integration eligibility.
 19. Multi-filter live sessions own one existing live coordinator/native handle
     per canonical filter identity. Windows routes discovery and selects UI
     previews; Rust still performs all calibration, registration and accumulation.

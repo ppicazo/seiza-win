@@ -29,6 +29,7 @@
             HorizontalScrollBarVisibility="Disabled"
             VerticalScrollBarVisibility="Auto">
             <StackPanel Spacing="18">
+                <ContentControl x:Name="ConfigurationHost" HorizontalContentAlignment="Stretch">
                 <StackPanel x:Name="ConfigurationPanel" Spacing="18">
                     <StackPanel Spacing="4">
                         <TextBlock Style="{ThemeResource SubtitleTextBlockStyle}" Text="Directory image stacking" />
@@ -45,13 +46,19 @@
                         BorderThickness="1"
                         CornerRadius="8">
                         <StackPanel Spacing="10">
+                            <ToggleSwitch x:Name="SkyGroupingToggle" Header="Group mosaic panels by solved coordinates" IsOn="False" Toggled="SkyGrouping_Toggled" OnContent="Automatic sky grouping" OffContent="Manual light selection" />
+                            <StackPanel x:Name="SkyGroupingControls" Visibility="Collapsed" Spacing="8">
+                                <TextBlock Text="Select the input lights below, then solve. Repeated pointings become panels; overlapping panels form a sky field. Review and select panels before stacking. Different fields produce separate outputs; unsolved lights are excluded." TextWrapping="Wrap" />
+                                <Button x:Name="SolvePanelsButton" Content="Solve and group selected lights" Click="SolvePanels_Click" />
+                                <TextBlock x:Name="SkyGroupingStatus" Text="Uses your installed plate-solving catalogs. No source files are changed." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
                             <Grid ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Style="{ThemeResource BodyStrongTextBlockStyle}" Text="Light frames" VerticalAlignment="Center" />
+                                <TextBlock x:Name="LightSelectionTitle" Style="{ThemeResource BodyStrongTextBlockStyle}" Text="Light frames — select inputs" VerticalAlignment="Center" />
                                 <Button Grid.Column="1" Click="SelectAll_Click" Content="All" />
                                 <Button Grid.Column="2" Click="SelectNone_Click" Content="None" />
                             </Grid>
@@ -61,6 +68,8 @@
                                 DisplayMemberPath="DisplayName"
                                 SelectionChanged="FrameList_SelectionChanged"
                                 SelectionMode="Multiple" />
+                            <StackPanel x:Name="SkyPanelReview" Visibility="Collapsed" Spacing="8" />
+                            <TextBlock x:Name="SkyOutputSummary" Visibility="Collapsed" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             <ToggleSwitch
                                 x:Name="SplitByFilterToggle"
                                 Header="Split stacks by filename filter"
@@ -134,7 +143,6 @@
                                 </ComboBox>
                             </Grid>
                             <StackPanel x:Name="MosaicOptionsPanel" Visibility="Collapsed" Spacing="8">
-                                <InfoBar x:Name="MosaicQualityInfoBar" IsOpen="False" IsClosable="False" Severity="Warning" Message="Published stacking 0.43.0 can leave patchy backgrounds in expanded Local background mode. Choose another normalization mode or wait for the published upstream fix (#338)." />
                                 <NumberBox x:Name="CanvasLimitBox" Header="Maximum canvas (million samples, pixels × channels)" Minimum="1" Maximum="1024" SmallChange="16" Value="256" ValueChanged="Options_ValueChanged" />
                                 <TextBlock Text="Plans overlapping panels together, including panels connected through other panels. Every selected light is pushed, including the anchor. Live acquisition uses a fixed canvas." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <TextBlock Text="Memory can peak near 40 bytes per sample: a 256-million-sample limit permits about 10 GB. Disconnected lights are reported, not silently included. Bayer drizzle and shared fixed alignment are unavailable on expanded canvases." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -369,11 +377,12 @@
                     <StackPanel x:Name="SplitOutputPanel" Spacing="6" Visibility="Collapsed">
                         <TextBlock Style="{ThemeResource BodyStrongTextBlockStyle}" Text="Output base name" />
                         <TextBox x:Name="OutputBaseNameBox" Text="stacked" TextChanged="OutputBaseNameBox_TextChanged" />
-                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Filter names are appended automatically; you will choose the output folder next." TextWrapping="Wrap" />
+                        <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Sky-field and filter names are appended automatically; you will choose the output folder next." TextWrapping="Wrap" />
                     </StackPanel>
 
                     <InfoBar x:Name="ValidationInfoBar" IsClosable="False" IsOpen="False" Severity="Error" />
                 </StackPanel>
+                </ContentControl>
 
                 <StackPanel x:Name="ProgressPanel" Spacing="12" Visibility="Collapsed">
                     <TextBlock Style="{ThemeResource SubtitleTextBlockStyle}" Text="Stacking images" />

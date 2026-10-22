@@ -57,6 +57,9 @@
     <Compile Include="..\..\src\Seiza.App\Models\ImageSampling.cs" Link="Models\ImageSampling.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\FitsStretch.cs" Link="Models\FitsStretch.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\ImageStacking.cs" Link="Models\ImageStacking.cs" />
+    <Compile Include="..\..\src\Seiza.App\Models\SkyPanelGrouping.cs" Link="Models\SkyPanelGrouping.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\SkyPanelService.cs" Link="Services\SkyPanelService.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\PlateSolveService.cs" Link="Services\PlateSolveService.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\StackReferenceSelection.cs" Link="Models\StackReferenceSelection.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\StackAlignmentReference.cs" Link="Models\StackAlignmentReference.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\StackingCoreCapabilities.cs" Link="Services\StackingCoreCapabilities.cs" />

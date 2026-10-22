@@ -123,16 +123,20 @@ Native sidebar controls shown with synthetic sample images.
 
 ## In development: faster solving and expanded mosaic stacks
 
-The development build adopts published Seiza/C ABI **0.40.1**, stacking
-**0.43.0**, parallax **0.17.0**, and image-io **0.10.0**. Blind solving now uses
-Seiza's faster candidate search and full-catalog refinement. In a local,
-warm-cache comparison against 0.39.0, Tulip solved in **0.35 s instead of
+The development build adopts published Seiza/C ABI **0.41.0**, stacking
+**0.44.0**, parallax **0.18.0**, and image-io **0.10.0**. Blind solving now uses
+Seiza's faster candidate search and full-catalog refinement. In an earlier local
+0.40.1 warm-cache comparison against 0.39.0, Tulip solved in **0.35 s instead of
 2.02 s**, and Big Q in **0.65 s instead of 2.67 s**, with lower RMS.
 Timings depend on the image, hardware and catalog.
 
-Batch stacking offers **Fixed reference frame** or **Expanded mosaic / dithered
-edges**, with a canvas memory limit, a 5% default overlap, existing registration
-and normalization choices, and visible planning/lens notes. See the
+Batch stacking offers **automatic coordinate-based panel grouping**: select
+lights, enable **Group mosaic panels by solved coordinates**, then **Solve and
+group selected lights**. Review sky fields and check whole panels or individual
+exposures before stacking; unrelated fields and unsolved files stay separate.
+Manual selection offers **Fixed reference frame** or **Expanded mosaic /
+dithered edges**, with a canvas memory limit, a 5% default overlap, existing
+registration and normalization choices, and visible planning/lens notes. See the
 [mosaic stacking guide and validation notes](docs/MOSAIC-STACKING.md) for limits,
 measurements, and compatibility details. These changes are not in 0.8.5.
 
