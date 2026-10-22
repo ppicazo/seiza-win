@@ -634,7 +634,8 @@ Install:
 
 - Visual Studio with the **WinUI application development** workload
 - .NET 10 SDK
-- Rust 1.89 or newer with the `x86_64-pc-windows-msvc` target
+- Rust 1.99.1 with the `x86_64-pc-windows-msvc` target (pinned in
+  `rust-toolchain.toml`, CI and release builds)
 
 Then build the app and native core:
 
