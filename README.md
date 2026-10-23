@@ -147,6 +147,18 @@ frames and unavailable GPU operations fall back to the CPU. Active and resumed
 live stacks keep their original mode; the preference is remembered across app
 restarts. GPU and CPU floating-point results need not be byte-identical.
 
+| Solve and group input lights | Review panels and individual exposures |
+| --- | --- |
+| ![Native Windows stacking dialog with automatic coordinate grouping enabled and the Solve and group selected lights button](docs/images/mosaic-stacking/readme-panel-setup.png) | ![Solved mosaic panels with whole-panel checkboxes, individual light selection and an output summary](docs/images/mosaic-stacking/readme-panel-selection.png) |
+
+| Expanded canvas controls | Persistent GPU preference |
+| --- | --- |
+| ![Expanded mosaic canvas selection and memory ceiling in the native Windows stacking dialog](docs/images/mosaic-stacking/readme-canvas.png) | ![Native Windows Settings showing automatic GPU acceleration for stacking](docs/images/stacking-gpu-settings.png) |
+
+These are native UI captures from the development build. The panel examples use
+crops and repeated copies of an M31 image to demonstrate selection, not
+independently captured mosaic exposures. No original exposures were modified.
+
 ## Seiza for Windows 0.8.5: multi-filter sessions, flat review and color stacking
 
 - Watch one parent **LIGHT** folder and run independent filter stacks as captures
