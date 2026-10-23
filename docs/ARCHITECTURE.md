@@ -162,7 +162,7 @@ Windows CI.
     encoding through MediaStreamSource/MediaTranscoder; no pixel math is ported
     to C#. The separate `seiza-platform` DLL adapts focused catalog
     status/setup and file-based color calibration through published Rust APIs,
-    not a fork of the shared C ABI. Core/C ABI 0.41.0 and parallax 0.18.0 come from published
+    not a fork of the shared C ABI. Core/C ABI 0.42.0 and parallax 0.19.0 come from published
     crates, with the upstream font notice included in the app. See
     [Parallax video](PARALLAX-VIDEO.md).
     Batch mosaics use the C ABI's expanded-canvas planner with all selected
@@ -180,6 +180,14 @@ Windows CI.
     Deselection recomputes connectivity, also within each filter; source stamps
     invalidate changed selections before integration. This selects inputs only:
     native star registration still determines actual integration eligibility.
+    The persisted stacking GPU preference defaults on and is read when a new
+    batch/live run is configured. Native `gpu.enabled=false` is also passed to
+    defect learning; reintegration inherits the stack's native GPU options.
+    Resume compatibility excludes only GPU execution policy, like the native
+    fingerprint, and a restored run adopts its saved GPU mode/options JSON rather
+    than changing an existing accumulator. Other processing settings still gate
+    compatibility. Settings initialization does not write preferences; failed
+    GPU-setting saves restore the persisted control value and show an error.
 19. Multi-filter live sessions own one existing live coordinator/native handle
     per canonical filter identity. Windows routes discovery and selects UI
     previews; Rust still performs all calibration, registration and accumulation.

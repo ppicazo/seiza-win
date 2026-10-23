@@ -10,11 +10,16 @@ namespace Seiza.App;
 public sealed partial class CatalogSettingsWindow : Window
 {
     private bool _loaded;
+    private bool _initializing = true;
+    private readonly string? _settingsPath;
 
     public CatalogSettingsViewModel ViewModel { get; } = CatalogSettingsViewModel.Instance;
 
-    public CatalogSettingsWindow()
+    public CatalogSettingsWindow() : this(null) { }
+
+    internal CatalogSettingsWindow(string? settingsPath)
     {
+        _settingsPath = settingsPath;
         InitializeComponent();
 
         ExtendsContentIntoTitleBar = true;
@@ -26,8 +31,10 @@ public sealed partial class CatalogSettingsWindow : Window
         Closed += CatalogSettingsWindow_Closed;
         AutomaticUpdateChecksToggle.IsOn =
             CatalogSettingsStore.LoadAutomaticallyCheckForUpdates();
+        UseStackingGpuToggle.IsOn = CatalogSettingsStore.LoadUseGpuForStacking(_settingsPath);
         RefreshRcAstroPath();
         UpdateVisualState();
+        _initializing = false;
     }
 
     private async void ContentRoot_Loaded(object sender, RoutedEventArgs e)
@@ -103,9 +110,29 @@ public sealed partial class CatalogSettingsWindow : Window
     private async void InstallParallax_Click(object sender, RoutedEventArgs e) =>
         await ViewModel.StartParallaxSetupAsync();
 
-    private void AutomaticUpdateChecks_Toggled(object sender, RoutedEventArgs e) =>
-        CatalogSettingsStore.SaveAutomaticallyCheckForUpdates(
-            AutomaticUpdateChecksToggle.IsOn);
+    private void AutomaticUpdateChecks_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_initializing)
+            CatalogSettingsStore.SaveAutomaticallyCheckForUpdates(AutomaticUpdateChecksToggle.IsOn);
+    }
+
+    private void StackingGpu_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_initializing) return;
+        try
+        {
+            CatalogSettingsStore.SaveUseGpuForStacking(UseStackingGpuToggle.IsOn, _settingsPath);
+            StackingGpuErrorBar.IsOpen = false;
+        }
+        catch (Exception error)
+        {
+            _initializing = true;
+            try { UseStackingGpuToggle.IsOn = CatalogSettingsStore.LoadUseGpuForStacking(_settingsPath); }
+            finally { _initializing = false; }
+            StackingGpuErrorBar.Message = $"Could not save stacking GPU preference: {error.Message}";
+            StackingGpuErrorBar.IsOpen = true;
+        }
+    }
 
     private async void CheckForUpdates_Click(object sender, RoutedEventArgs e) =>
         await App.Updates.CheckForUpdatesAsync(ContentRoot, userInitiated: true);

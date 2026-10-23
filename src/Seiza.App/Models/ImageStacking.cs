@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Seiza.App.Services;
 
@@ -29,6 +30,9 @@ internal enum StackRejectionMode
 internal sealed class ImageStackOptions
 {
     private double? _minimumOverlap;
+    public bool UseGpu { get; set; } = true;
+    // Diagnostic only; normal app requests leave tracing off.
+    internal bool TraceGpu { get; set; }
     // Host-side planning policy, not part of the native StackOptions JSON.
     public StackCanvasMode CanvasMode { get; set; }
     public int MaximumCanvasMegasamples { get; set; } = 256;
@@ -191,10 +195,32 @@ internal sealed class ImageStackOptions
                 StackDemosaic.Mhc => "mhc",
                 StackDemosaic.Bilinear => "bilinear",
                 _ => null,
-            }, LearnedDefects);
+            }, LearnedDefects, UseGpu && !TraceGpu ? null : new StackGpuPayload(UseGpu, TraceGpu));
         return JsonSerializer.Serialize(
             payload,
             SeizaJsonSerializerContext.Default.StackOptionsPayload);
+    }
+
+    internal static bool SavedUsesGpu(string json)
+    {
+        var options = JsonNode.Parse(json)!.AsObject();
+        return options["gpu"]?["enabled"]?.GetValue<bool>() ?? true;
+    }
+
+    internal static bool SameProcessingOptions(string left, string right)
+    {
+        try
+        {
+            JsonObject a = JsonNode.Parse(left)!.AsObject(), b = JsonNode.Parse(right)!.AsObject();
+            // Validate the saved execution-policy shape before a checkpoint is
+            // opened, even though it does not change processing compatibility.
+            _ = a["gpu"]?["enabled"]?.GetValue<bool>();
+            _ = b["gpu"]?["enabled"]?.GetValue<bool>();
+            a.Remove("gpu"); b.Remove("gpu");
+            return JsonNode.DeepEquals(a, b);
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or NullReferenceException or FormatException)
+        { return false; }
     }
 
     // The native contract stores these thresholds as f32, not C# doubles.
@@ -725,7 +751,12 @@ internal sealed record StackOptionsPayload(
     [property: JsonPropertyName("cfa_integration"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CfaIntegration,
     [property: JsonPropertyName("interpolation"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Interpolation,
     [property: JsonPropertyName("demosaic"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Demosaic,
-    [property: JsonPropertyName("defects"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? Defects);
+    [property: JsonPropertyName("defects"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? Defects,
+    [property: JsonPropertyName("gpu"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StackGpuPayload? Gpu);
+
+internal sealed record StackGpuPayload(
+    [property: JsonPropertyName("enabled")] bool Enabled,
+    [property: JsonPropertyName("trace"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Trace = false);
 
 internal sealed record StackCosmeticPayload(
     [property: JsonPropertyName("low_sigma")] double LowSigma,

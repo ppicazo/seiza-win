@@ -13,6 +13,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
 {
     private readonly IReadOnlyList<StackFrameChoice> _frames;
     private readonly string? _browserRoot;
+    private readonly Func<bool> _useGpuSetting;
     private readonly Dictionary<string, string> _referencePaths = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string[]> _rankedReferencePaths = new(StringComparer.Ordinal);
     private readonly TaskCompletionSource<ImageStackBatchResult?> _completion = new(
@@ -37,8 +38,9 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     private string? _calibrationLibraryPath;
     private string? _alignmentReferencePath;
 
-    internal ImageStackWindow(IReadOnlyList<string> paths, string? browserRoot = null)
+    internal ImageStackWindow(IReadOnlyList<string> paths, string? browserRoot = null, Func<bool>? useGpuSetting = null)
     {
+        _useGpuSetting = useGpuSetting ?? (() => CatalogSettingsStore.LoadUseGpuForStacking());
         InitializeComponent();
         _browserRoot = browserRoot;
         MinimumWeightBox.Value = new ImageStackOptions().MinimumWeight;
@@ -523,6 +525,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
 
     private ImageStackOptions CreateOptions() => new()
     {
+        UseGpu = _useGpuSetting(),
         CanvasMode = SelectedTag(CanvasModePicker) == "Expanded" ? StackCanvasMode.Expanded : StackCanvasMode.Reference,
         MaximumCanvasMegasamples = CheckedInt(CanvasLimitBox.Value),
         RegistrationModel = SelectedTag(RegistrationModelPicker) switch

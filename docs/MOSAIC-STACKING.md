@@ -1,7 +1,25 @@
 # Expanded mosaic stacking (development build)
 
 These controls are newer than Windows 0.8.5. They use published Seiza/C ABI
-0.41.0 and stacking 0.44.0; no Git or vendored core dependency is used.
+0.42.0 and stacking 0.45.0; no Git or vendored core dependency is used.
+
+## GPU preference
+
+In **Settings → Stacking performance**, **Use GPU for stacking** defaults on
+(automatic). Turn it off for CPU-only processing. This applies to new fixed and
+expanded batch stacks and new live stacks, including defect learning and final
+reintegration. Seiza uses Direct3D 12 or another available native backend and
+falls back to CPU processing if a GPU operation is unavailable. Small frames may
+remain on the CPU even when enabled. GPU rounding can differ from CPU results;
+byte-identical outputs are not promised.
+
+Active and resumed live stacks retain their original setting. Changing the
+preference does not invalidate an otherwise compatible checkpoint or discard
+its accumulator; the resume notice explains when the saved mode differs from
+Settings. Other processing-option changes still require a compatible session.
+The preference persists immediately and across app restarts.
+
+![Native Windows stacking GPU preference](images/stacking-gpu-settings.png)
 
 ## Selecting panels automatically
 

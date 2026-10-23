@@ -123,8 +123,8 @@ Native sidebar controls shown with synthetic sample images.
 
 ## In development: faster solving and expanded mosaic stacks
 
-The development build adopts published Seiza/C ABI **0.41.0**, stacking
-**0.44.0**, parallax **0.18.0**, and image-io **0.10.0**. Blind solving now uses
+The development build adopts published Seiza/C ABI **0.42.0**, stacking
+**0.45.0**, parallax **0.19.0**, and image-io **0.11.0**. Blind solving now uses
 Seiza's faster candidate search and full-catalog refinement. In an earlier local
 0.40.1 warm-cache comparison against 0.39.0, Tulip solved in **0.35 s instead of
 2.02 s**, and Big Q in **0.65 s instead of 2.67 s**, with lower RMS.
@@ -139,6 +139,13 @@ dithered edges**, with a canvas memory limit, a 5% default overlap, existing
 registration and normalization choices, and visible planning/lens notes. See the
 [mosaic stacking guide and validation notes](docs/MOSAIC-STACKING.md) for limits,
 measurements, and compatibility details. These changes are not in 0.8.5.
+
+**Settings → Stacking performance → Use GPU for stacking** controls acceleration
+for new batch and live stacks, including defect learning and reintegration.
+It defaults to automatic GPU use; turn it off for CPU-only processing. Small
+frames and unavailable GPU operations fall back to the CPU. Active and resumed
+live stacks keep their original mode; the preference is remembered across app
+restarts. GPU and CPU floating-point results need not be byte-identical.
 
 ## Seiza for Windows 0.8.5: multi-filter sessions, flat review and color stacking
 
