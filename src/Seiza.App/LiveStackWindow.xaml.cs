@@ -48,9 +48,11 @@ public sealed partial class LiveStackWindow : Window, IDisposable
     private bool _closed;
     private bool _allowClose;
     private bool _closeInProgress;
+    private readonly Func<bool> _useGpuSetting;
 
-    internal LiveStackWindow(string initialFolder)
+    internal LiveStackWindow(string initialFolder, Func<bool>? useGpuSetting = null)
     {
+        _useGpuSetting = useGpuSetting ?? (() => CatalogSettingsStore.LoadUseGpuForStacking());
         InitializeComponent();
         MinimumWeightBox.Value = new ImageStackOptions().MinimumWeight;
         WatchFolderTextBox.Text = Path.GetFullPath(initialFolder);
@@ -354,6 +356,7 @@ public sealed partial class LiveStackWindow : Window, IDisposable
 
     private ImageStackOptions CreateOptions() => new()
     {
+        UseGpu = _useGpuSetting(),
         RegistrationModel = SelectedTag(RegistrationModelPicker) switch
         {
             "Affine" => StackRegistrationModel.Affine,

@@ -81,6 +81,17 @@ internal static class CatalogSettingsStore
         }
     }
 
+    public static bool LoadUseGpuForStacking(string? path = null)
+    {
+        lock (SyncRoot) return LoadSettings(path).UseGpuForStacking;
+    }
+
+    public static void SaveUseGpuForStacking(bool value, string? path = null)
+    {
+        lock (SyncRoot)
+            SaveSettings(LoadSettings(path) with { UseGpuForStacking = value }, path);
+    }
+
     public static void SaveAutomaticallyCheckForUpdates(bool value)
     {
         lock (SyncRoot)
@@ -150,6 +161,7 @@ internal static class CatalogSettingsStore
         public string? CatalogDirectory { get; init; }
         public string? RcAstroExecutable { get; init; }
         public string BrowserGrouping { get; init; } = "Folder";
+        public bool UseGpuForStacking { get; init; } = true;
 
         public bool AutomaticallyCheckForUpdates { get; init; } = true;
 

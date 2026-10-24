@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Seiza.App.Services;
 
@@ -18,6 +19,7 @@ internal enum StackWeightingMode { Equal, InverseNoiseVariance }
 internal enum StackInterpolation { Bilinear, Lanczos3 }
 internal enum StackDemosaic { Vng, Mhc, Bilinear }
 internal enum StackCfaIntegration { Demosaic, BayerDrizzle }
+internal enum StackCanvasMode { Reference, Expanded }
 
 internal enum StackRejectionMode
 {
@@ -27,6 +29,13 @@ internal enum StackRejectionMode
 
 internal sealed class ImageStackOptions
 {
+    private double? _minimumOverlap;
+    public bool UseGpu { get; set; } = true;
+    // Diagnostic only; normal app requests leave tracing off.
+    internal bool TraceGpu { get; set; }
+    // Host-side planning policy, not part of the native StackOptions JSON.
+    public StackCanvasMode CanvasMode { get; set; }
+    public int MaximumCanvasMegasamples { get; set; } = 256;
     public StackNormalizationMode Normalization { get; set; } = StackNormalizationMode.Global;
     public int LocalTileSize { get; set; } = 256;
     public StackRejectionMode Rejection { get; set; } = StackRejectionMode.DeltaSigma;
@@ -36,7 +45,11 @@ internal sealed class ImageStackOptions
     public double MaximumRegistrationRms { get; set; } = 2.0;
     public double MaximumDriftPixels { get; set; } = 256.0;
     public double MaximumDriftFraction { get; set; } = 0.15;
-    public double MinimumOverlap { get; set; } = 0.60;
+    public double MinimumOverlap
+    {
+        get => _minimumOverlap ?? (CanvasMode == StackCanvasMode.Expanded ? 0.05 : 0.60);
+        set => _minimumOverlap = value;
+    }
     public StackRegistrationModel RegistrationModel { get; set; } = StackRegistrationModel.Similarity;
     public StackWeightingMode Weighting { get; set; } = StackWeightingMode.Equal;
     public double MinimumWeight { get; set; } = 0.05;
@@ -76,12 +89,20 @@ internal sealed class ImageStackOptions
     {
         get
         {
-            if (!Enum.IsDefined(Normalization) || !Enum.IsDefined(Rejection) ||
+            if (!Enum.IsDefined(CanvasMode) || !Enum.IsDefined(Normalization) || !Enum.IsDefined(Rejection) ||
                 !Enum.IsDefined(RegistrationModel) || !Enum.IsDefined(Weighting) ||
                 !Enum.IsDefined(Interpolation) || !Enum.IsDefined(Demosaic) ||
                 !Enum.IsDefined(CfaIntegration))
             {
                 return "Choose a supported stacking option.";
+            }
+            if (CanvasMode == StackCanvasMode.Expanded && MaximumCanvasMegasamples is < 1 or > 1024)
+            {
+                return "Choose a canvas limit between 1 and 1024 million samples.";
+            }
+            if (CanvasMode == StackCanvasMode.Expanded && CfaIntegration == StackCfaIntegration.BayerDrizzle)
+            {
+                return "Expanded mosaic canvases do not support Bayer drizzle. Choose demosaiced integration.";
             }
             if (Normalization is StackNormalizationMode.Local or StackNormalizationMode.LocalBackground &&
                 LocalTileSize < 16)
@@ -174,10 +195,32 @@ internal sealed class ImageStackOptions
                 StackDemosaic.Mhc => "mhc",
                 StackDemosaic.Bilinear => "bilinear",
                 _ => null,
-            }, LearnedDefects);
+            }, LearnedDefects, UseGpu && !TraceGpu ? null : new StackGpuPayload(UseGpu, TraceGpu));
         return JsonSerializer.Serialize(
             payload,
             SeizaJsonSerializerContext.Default.StackOptionsPayload);
+    }
+
+    internal static bool SavedUsesGpu(string json)
+    {
+        var options = JsonNode.Parse(json)!.AsObject();
+        return options["gpu"]?["enabled"]?.GetValue<bool>() ?? true;
+    }
+
+    internal static bool SameProcessingOptions(string left, string right)
+    {
+        try
+        {
+            JsonObject a = JsonNode.Parse(left)!.AsObject(), b = JsonNode.Parse(right)!.AsObject();
+            // Validate the saved execution-policy shape before a checkpoint is
+            // opened, even though it does not change processing compatibility.
+            _ = a["gpu"]?["enabled"]?.GetValue<bool>();
+            _ = b["gpu"]?["enabled"]?.GetValue<bool>();
+            a.Remove("gpu"); b.Remove("gpu");
+            return JsonNode.DeepEquals(a, b);
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or NullReferenceException or FormatException)
+        { return false; }
     }
 
     // The native contract stores these thresholds as f32, not C# doubles.
@@ -363,8 +406,11 @@ internal sealed record ImageStackGroup(
     ImageFilenameFilter? Filter,
     IReadOnlyList<string> Inputs)
 {
-    public string Title => Filter?.Title ?? (Id == "all" ? "All frames" : "Other");
-    public string FilenameSuffix => Filter?.FilenameSuffix ?? "Other";
+    public string? FieldTitle { get; init; }
+    public string Title => FieldTitle is null ? Filter?.Title ?? (Id == "all" ? "All frames" : "Other")
+        : Filter is null ? FieldTitle : $"{FieldTitle} · {Filter.Title}";
+    public string FilenameSuffix => FieldTitle is null ? Filter?.FilenameSuffix ?? "Other"
+        : Filter is null ? FieldTitle : $"{FieldTitle}-{Filter.FilenameSuffix}";
 }
 
 internal static class ImageStackGrouping
@@ -512,6 +558,10 @@ internal static class ImageStackValidation
 
     private static void ValidateRequest(ImageStackRequest request)
     {
+        if (request.Options.CanvasMode == StackCanvasMode.Expanded && request.AlignmentReferencePath is not null)
+        {
+            throw new ArgumentException("Expanded mosaics cannot use a shared fixed alignment image.", nameof(request));
+        }
         if (request.Inputs.Count < 2)
         {
             throw new ArgumentException("Choose at least two images to stack.", nameof(request));
@@ -645,7 +695,8 @@ internal sealed record ImageStackResult(
     StackSnrAnalysis SnrAnalysis,
     string? SnrWarning,
     string? TransientRemovalNote = null,
-    StackAlignmentReferenceSelection? ReferenceSelection = null);
+    StackAlignmentReferenceSelection? ReferenceSelection = null,
+    string? CanvasNote = null);
 
 internal sealed record ImageStackBatchResult(IReadOnlyList<ImageStackResult> Results)
 {
@@ -700,7 +751,12 @@ internal sealed record StackOptionsPayload(
     [property: JsonPropertyName("cfa_integration"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CfaIntegration,
     [property: JsonPropertyName("interpolation"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Interpolation,
     [property: JsonPropertyName("demosaic"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Demosaic,
-    [property: JsonPropertyName("defects"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? Defects);
+    [property: JsonPropertyName("defects"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? Defects,
+    [property: JsonPropertyName("gpu"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StackGpuPayload? Gpu);
+
+internal sealed record StackGpuPayload(
+    [property: JsonPropertyName("enabled")] bool Enabled,
+    [property: JsonPropertyName("trace"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Trace = false);
 
 internal sealed record StackCosmeticPayload(
     [property: JsonPropertyName("low_sigma")] double LowSigma,

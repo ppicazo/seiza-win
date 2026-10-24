@@ -121,6 +121,44 @@ RGB histograms, searchable source headers, and processing provenance.
 
 Native sidebar controls shown with synthetic sample images.
 
+## In development: faster solving and expanded mosaic stacks
+
+The development build adopts published Seiza/C ABI **0.42.0**, stacking
+**0.45.0**, parallax **0.19.0**, and image-io **0.11.0**. Blind solving now uses
+Seiza's faster candidate search and full-catalog refinement. In an earlier local
+0.40.1 warm-cache comparison against 0.39.0, Tulip solved in **0.35 s instead of
+2.02 s**, and Big Q in **0.65 s instead of 2.67 s**, with lower RMS.
+Timings depend on the image, hardware and catalog.
+
+Batch stacking offers **automatic coordinate-based panel grouping**: select
+lights, enable **Group mosaic panels by solved coordinates**, then **Solve and
+group selected lights**. Review sky fields and check whole panels or individual
+exposures before stacking; unrelated fields and unsolved files stay separate.
+Manual selection offers **Fixed reference frame** or **Expanded mosaic /
+dithered edges**, with a canvas memory limit, a 5% default overlap, existing
+registration and normalization choices, and visible planning/lens notes. See the
+[mosaic stacking guide and validation notes](docs/MOSAIC-STACKING.md) for limits,
+measurements, and compatibility details. These changes are not in 0.8.5.
+
+**Settings → Stacking performance → Use GPU for stacking** controls acceleration
+for new batch and live stacks, including defect learning and reintegration.
+It defaults to automatic GPU use; turn it off for CPU-only processing. Small
+frames and unavailable GPU operations fall back to the CPU. Active and resumed
+live stacks keep their original mode; the preference is remembered across app
+restarts. GPU and CPU floating-point results need not be byte-identical.
+
+| Solve and group input lights | Review panels and individual exposures |
+| --- | --- |
+| ![Native Windows stacking dialog with automatic coordinate grouping enabled and the Solve and group selected lights button](docs/images/mosaic-stacking/readme-panel-setup.png) | ![Solved mosaic panels with whole-panel checkboxes, individual light selection and an output summary](docs/images/mosaic-stacking/readme-panel-selection.png) |
+
+| Expanded canvas controls | Persistent GPU preference |
+| --- | --- |
+| ![Expanded mosaic canvas selection and memory ceiling in the native Windows stacking dialog](docs/images/mosaic-stacking/readme-canvas.png) | ![Native Windows Settings showing automatic GPU acceleration for stacking](docs/images/stacking-gpu-settings.png) |
+
+These are native UI captures from the development build. The panel examples use
+crops and repeated copies of an M31 image to demonstrate selection, not
+independently captured mosaic exposures. No original exposures were modified.
+
 ## Seiza for Windows 0.8.5: multi-filter sessions, flat review and color stacking
 
 - Watch one parent **LIGHT** folder and run independent filter stacks as captures
@@ -619,7 +657,8 @@ Install:
 
 - Visual Studio with the **WinUI application development** workload
 - .NET 10 SDK
-- Rust 1.89 or newer with the `x86_64-pc-windows-msvc` target
+- Rust 1.99.1 with the `x86_64-pc-windows-msvc` target (pinned in
+  `rust-toolchain.toml`, CI and release builds)
 
 Then build the app and native core:
 

@@ -11,6 +11,8 @@ internal static class ImageStackService
     {
         ImageStackValidation.ValidateBatch(jobs);
         string[] protectedBatchSourcePaths = ImageStackValidation.GetProtectedSourcePaths(jobs);
+        if (jobs.Any(job => job.Request.Options.CanvasMode == StackCanvasMode.Expanded))
+            StackingCoreCapabilities.Current.RequireExpandedCanvas();
         foreach (ImageStackJob job in jobs.Where(job => job.Request.AlignmentReferencePath is not null))
         {
             // Fail before any earlier group can write an output when a
@@ -92,7 +94,14 @@ internal static class ImageStackService
             request.Options, request.Calibration, cancellationToken).ConfigureAwait(false);
         ImageStackSession opened;
         StackAlignmentReferenceSelection? referenceSelection = null;
-        if (request.AlignmentReferencePath is string alignmentPath)
+        if (preparedOptions.CanvasMode == StackCanvasMode.Expanded)
+        {
+            progress?.Invoke(new ImageStackProgress(ImageStackProgressPhase.Preparing,
+                "Planning expanded mosaic canvas…", 0, request.Inputs.Count, 0, 0));
+            opened = await ImageStackSession.OpenExpandedAsync(request.Inputs, preparedOptions,
+                request.Calibration, cancellationToken).ConfigureAwait(false);
+        }
+        else if (request.AlignmentReferencePath is string alignmentPath)
         {
             ImageStackReferenceOpenResult result = await ImageStackSession.OpenWithReferenceImageAsync(
                 alignmentPath,
@@ -113,7 +122,7 @@ internal static class ImageStackService
         await using ImageStackSession session = opened;
         string[] orderedInputs = request.InputsStartingWith(
             referenceSelection?.ChannelReferencePath ?? request.Inputs[0]);
-        bool referenceIntegrated = request.AlignmentReferencePath is null;
+        bool referenceIntegrated = request.AlignmentReferencePath is null && preparedOptions.CanvasMode != StackCanvasMode.Expanded;
 
         var dispositions = new List<ImageStackDisposition>(request.Inputs.Count - 1);
         var snrSamples = new List<ImageStackSnrSample>();
@@ -158,7 +167,7 @@ internal static class ImageStackService
             if (!referenceIntegrated && index == 0 && !push.Disposition.Accepted)
             {
                 throw new SeizaCoreException(
-                    $"The channel reference could not be integrated: {push.Disposition.Reason}");
+                    $"The {(preparedOptions.CanvasMode == StackCanvasMode.Expanded ? "mosaic anchor" : "channel reference")} could not be integrated: {push.Disposition.Reason}");
             }
 
             counts = await session.GetCountsAsync(cancellationToken).ConfigureAwait(false);
@@ -247,7 +256,8 @@ internal static class ImageStackService
                         sample.Signal))),
                     snrWarning,
                     transientNote,
-                    referenceSelection);
+                    referenceSelection,
+                    session.CanvasNote);
             }
         }
         finally

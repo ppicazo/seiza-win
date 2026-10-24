@@ -12,7 +12,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
     private const int MaximumAttentionItems = 50;
     private static readonly TimeSpan TransientProgressInterval = TimeSpan.FromMilliseconds(500);
     private readonly LiveStackRunConfiguration _configuration;
-    private readonly string _optionsJson;
+    private string _optionsJson;
     private readonly TimeProvider _timeProvider;
     private readonly LiveStackSessionStore _store;
     private readonly StackFolderMonitor _monitor;
@@ -839,8 +839,13 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                         candidate.State,
                         nativeState,
                         cancellationToken).ConfigureAwait(false);
+                bool savedGpu = ImageStackOptions.SavedUsesGpu(candidate.State.StackOptionsJson);
                 _session = candidateSession;
                 candidateSession = null;
+                if (savedGpu != _configuration.Options.UseGpu)
+                    AddAttention("Resumed stack retains its saved GPU setting; Settings applies to new stacks.");
+                _configuration.Options.UseGpu = savedGpu;
+                _optionsJson = candidate.State.StackOptionsJson;
                 RestoreState(candidate, nativeState, referenceSignature);
                 _alignmentReferencePath = nativeState.ReferenceImagePath;
                 SeedCalibrationPaths(_calibration);
@@ -2071,7 +2076,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
         PathsEqual(state.WatchFolder, _configuration.WatchFolder) &&
         state.IncludesSubdirectories == _configuration.IncludeSubdirectories &&
         state.LearnDefects == _configuration.Options.LearnDefects &&
-        string.Equals(state.StackOptionsJson, _optionsJson, StringComparison.Ordinal);
+        ImageStackOptions.SameProcessingOptions(state.StackOptionsJson, _optionsJson);
 
     private void MarkCheckpointDirtyLocked()
     {

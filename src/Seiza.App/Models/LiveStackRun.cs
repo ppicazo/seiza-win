@@ -238,6 +238,8 @@ internal sealed record LiveStackRunConfiguration
         }
         ArgumentNullException.ThrowIfNull(Options);
         ArgumentNullException.ThrowIfNull(Calibration);
+        if (Options.CanvasMode == StackCanvasMode.Expanded)
+            throw new ArgumentException("Expanded mosaics require a complete input list. Use batch stacking, not live acquisition.", nameof(Options));
         if (Options.ValidationMessage is string optionsError)
         {
             throw new ArgumentException(optionsError, nameof(Options));
