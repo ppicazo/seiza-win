@@ -187,6 +187,12 @@ internal static partial class NativeMethods
 
     [LibraryImport(
         LibraryName,
+        EntryPoint = "seiza_live_stacker_open_context_with_gpu",
+        StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint OpenLiveStackerContextWithGpu(string contextPath, string gpuJson, out nint error);
+
+    [LibraryImport(
+        LibraryName,
         EntryPoint = "seiza_live_stacker_save_context",
         StringMarshalling = StringMarshalling.Utf8)]
     [return: MarshalAs(UnmanagedType.U1)]

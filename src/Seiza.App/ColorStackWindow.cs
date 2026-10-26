@@ -54,6 +54,9 @@ public sealed class ColorStackWindow : Window, IDisposable
         _calibrate.Unchecked += (_, _) => _solve.IsEnabled = false;
         var root = new StackPanel { Spacing = 16, Padding = new Thickness(24) };
         root.Children.Add(new TextBlock { Text = "Compose and calibrate color", FontSize = 24 });
+        var advanced = new Button { Content = "Narrowband, continuum and RGB stars…" };
+        advanced.Click += (_, _) => App.ShowColorTools();
+        root.Children.Add(advanced);
         _inputHost.Content = _inputs;
         root.Children.Add(_inputHost); root.Children.Add(_progress); root.Children.Add(_status); root.Children.Add(_open);
         Content = new ScrollViewer { Content = root };

@@ -51,6 +51,25 @@ public sealed class MosaicStackingTests
         Assert.Throws<SeizaCoreException>(() => new StackingCoreCapabilities(true, true).RequireExpandedCanvas());
     }
 
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(3, true)]
+    [InlineData(2, false)]
+    public void ExpandedCanvasRefusesLocalNormalizationBeforeReadingAnyInputs(int mode, bool supported)
+    {
+        var options = new ImageStackOptions { CanvasMode = StackCanvasMode.Expanded, Normalization = (StackNormalizationMode)mode };
+        if (supported) Assert.Null(options.ValidationMessage);
+        else
+        {
+            Assert.Contains("Local normalization", options.ValidationMessage);
+            Assert.Throws<ArgumentException>(() => { _ = ImageStackSession.OpenExpandedAsync(
+                [@"C:\missing-first.fits", @"C:\missing-second.fits"], options, new ImageStackCalibration()); });
+        }
+        options.CanvasMode = StackCanvasMode.Reference;
+        Assert.Null(options.ValidationMessage);
+    }
+
     [Fact]
     public void MosaicPolicyCannotLeakIntoFixedOrLiveOpenPaths()
     {

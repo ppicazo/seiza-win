@@ -23,6 +23,8 @@ internal static partial class ColorWorkflowService
     private static partial nint WcsHeaders(string wcs, out nint error);
     [LibraryImport("seiza_platform", EntryPoint = "seiza_win_color_calibrated", StringMarshalling = StringMarshalling.Utf8)]
     private static partial int IsCalibratedFile(string path, out nint error);
+    [LibraryImport("seiza_platform", EntryPoint = "seiza_win_color_is_display", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int IsDisplayFile(string path, out nint error);
     [LibraryImport("seiza_platform", EntryPoint = "seiza_win_string_free")]
     private static partial void Free(nint value);
 
@@ -151,6 +153,20 @@ internal static partial class ColorWorkflowService
         if (Path.GetExtension(path).ToLowerInvariant() is not (".fits" or ".fit" or ".fts" or ".xisf")) return processing;
         int calibrated = IsCalibratedFile(path, out nint error);
         if (error != 0) Free(error); // The regular image reader reports invalid inputs.
-        return calibrated == 1 ? PreserveColor(processing) : processing;
+        var result = calibrated == 1 ? PreserveColor(processing) : processing.Clone();
+        result.PreserveDisplaySamples = HasDisplayTransfer(path);
+        return result;
     }
+
+    internal static bool HasDisplayTransfer(string path)
+    {
+        if (Path.GetExtension(path).ToLowerInvariant() is not (".fits" or ".fit" or ".fts" or ".xisf")) return false;
+        int display = IsDisplayFile(path, out nint error);
+        if (error != 0) Free(error);
+        return display == 1;
+    }
+
+    internal static FitsImageProcessingConfiguration InitialProcessingFor(string path) => HasDisplayTransfer(path)
+        ? new(new FitsStretchStack([FitsStretchConfiguration.CreateIdentity()]), null) { PreserveDisplaySamples = true }
+        : FitsImageProcessingConfiguration.Default.Clone();
 }

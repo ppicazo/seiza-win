@@ -165,7 +165,7 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="Normalization" VerticalAlignment="Center" />
-                                <ComboBox x:Name="NormalizationPicker" Grid.Column="1" AutomationProperties.Name="Normalization" HorizontalAlignment="Stretch" SelectionChanged="OptionsSelection_Changed" ToolTipService.ToolTip="Local background matches sky gradients while retaining one gain per channel; Local also fits gains per tile.">
+                                <ComboBox x:Name="NormalizationPicker" Grid.Column="1" AutomationProperties.Name="Normalization" HorizontalAlignment="Stretch" SelectionChanged="OptionsSelection_Changed" ToolTipService.ToolTip="Local background matches sky gradients while retaining one gain per channel; Local also fits gains per tile and requires a fixed reference canvas.">
                                     <ComboBoxItem Content="None" Tag="None" />
                                     <ComboBoxItem Content="Global" Tag="Global" IsSelected="True" />
                                     <ComboBoxItem Content="Local" Tag="Local" />

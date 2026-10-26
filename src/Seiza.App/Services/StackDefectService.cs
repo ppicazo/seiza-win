@@ -36,6 +36,5 @@ internal static partial class StackDefectService
     }
 
     internal static string DetectionOptionsJson(ImageStackOptions options) =>
-        "{\"sigma\":5,\"persistence\":0.6,\"maximum_frames\":16,\"gpu\":{\"enabled\":" +
-        (options.UseGpu ? "true" : "false") + ",\"trace\":" + (options.TraceGpu ? "true" : "false") + "}}";
+        "{\"sigma\":5,\"persistence\":0.6,\"maximum_frames\":16,\"gpu\":" + options.ToGpuJson() + "}";
 }

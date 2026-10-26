@@ -66,6 +66,8 @@
     <Compile Include="..\..\src\Seiza.App\Services\StackReferenceService.cs" Link="Services\StackReferenceService.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\StackDefectService.cs" Link="Services\StackDefectService.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ColorWorkflowService.cs" Link="Services\ColorWorkflowService.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\ColorToolsService.cs" Link="Services\ColorToolsService.cs" />
+    <Compile Include="..\..\src\Seiza.App\Models\ColorTools.cs" Link="Models\ColorTools.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\ImageStackSession.cs" Link="Models\ImageStackSession.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\ImageMetadata.cs" Link="Models\ImageMetadata.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\CatalogStatus.cs" Link="Models\CatalogStatus.cs" />
@@ -80,6 +82,9 @@
     <Compile Include="..\..\src\Seiza.App\Models\LiveStackRun.cs" Link="Models\LiveStackRun.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\StackSnrPresentation.cs" Link="Models\StackSnrPresentation.cs" />
     <Compile Include="..\..\src\Seiza.App\Rendering\ImageSpaceTransform.cs" Link="Rendering\ImageSpaceTransform.cs" />
+    <Compile Include="..\..\src\Seiza.App\Rendering\ImageTileLayout.cs" Link="Rendering\ImageTileLayout.cs" />
+    <Compile Include="..\..\src\Seiza.App\Rendering\BgraBitmapStream.cs" Link="Rendering\BgraBitmapStream.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\Bgra8Compositor.cs" Link="Services\Bgra8Compositor.cs" />
     <Compile Include="..\..\src\Seiza.App\Rendering\OverlayOptions.cs" Link="Rendering\OverlayOptions.cs" />
     <Compile Include="..\..\src\Seiza.App\Rendering\StarAnalysisOverlayLifecycle.cs" Link="Rendering\StarAnalysisOverlayLifecycle.cs" />
     <Compile Include="..\..\src\Seiza.App\Rendering\StarAnalysisOverlayGeometry.cs" Link="Rendering\StarAnalysisOverlayGeometry.cs" />

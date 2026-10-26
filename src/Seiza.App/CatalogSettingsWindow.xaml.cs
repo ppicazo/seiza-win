@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Seiza.App.Models;
 using Seiza.App.Services;
 using Seiza.App.ViewModels;
 using Windows.Graphics;
@@ -32,6 +34,8 @@ public sealed partial class CatalogSettingsWindow : Window
         AutomaticUpdateChecksToggle.IsOn =
             CatalogSettingsStore.LoadAutomaticallyCheckForUpdates();
         UseStackingGpuToggle.IsOn = CatalogSettingsStore.LoadUseGpuForStacking(_settingsPath);
+        StackingGpuMemoryBox.Value = CatalogSettingsStore.LoadStackingGpuMemoryMib(_settingsPath) ?? 0;
+        StackingGpuMemoryBox.IsEnabled = UseStackingGpuToggle.IsOn;
         RefreshRcAstroPath();
         UpdateVisualState();
         _initializing = false;
@@ -130,6 +134,29 @@ public sealed partial class CatalogSettingsWindow : Window
             try { UseStackingGpuToggle.IsOn = CatalogSettingsStore.LoadUseGpuForStacking(_settingsPath); }
             finally { _initializing = false; }
             StackingGpuErrorBar.Message = $"Could not save stacking GPU preference: {error.Message}";
+            StackingGpuErrorBar.IsOpen = true;
+        }
+        StackingGpuMemoryBox.IsEnabled = UseStackingGpuToggle.IsOn;
+    }
+
+    private void StackingGpuMemory_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_initializing) return;
+        try
+        {
+            double value = sender.Value;
+            if (!double.IsFinite(value) || value != Math.Truncate(value) ||
+                value is < 0 or > ImageStackOptions.MaximumGpuMemoryMib)
+                throw new ArgumentException("Choose a whole MiB value, or 0 for automatic.");
+            CatalogSettingsStore.SaveStackingGpuMemoryMib(value == 0 ? null : checked((int)value), _settingsPath);
+            StackingGpuErrorBar.IsOpen = false;
+        }
+        catch (Exception error)
+        {
+            _initializing = true;
+            try { sender.Value = CatalogSettingsStore.LoadStackingGpuMemoryMib(_settingsPath) ?? 0; }
+            finally { _initializing = false; }
+            StackingGpuErrorBar.Message = $"Could not save GPU memory budget: {error.Message}";
             StackingGpuErrorBar.IsOpen = true;
         }
     }
