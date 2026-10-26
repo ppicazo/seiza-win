@@ -18,6 +18,7 @@ public sealed partial class MainPage
     private readonly HashSet<string> _visibleBrowserPaths = new(StringComparer.OrdinalIgnoreCase);
     private ImageBrowserGrouping _browserGrouping = ImageBrowserGrouping.Folder;
     private string? _browserRoot;
+    private string? _browserListPath;
     private string? _browserStatus;
     private bool _includeSubfolders = true;
     private bool _isScanningFolder;
@@ -88,9 +89,11 @@ public sealed partial class MainPage
         var cancellation = BeginBrowserDiscovery();
         try
         {
+            listPath = Path.GetFullPath(listPath);
             ImagePathListResult result = await Task.Run(() => ImagePathList.Read(listPath, cancellation.Token), cancellation.Token);
             if (!IsCurrentBrowserDiscovery(cancellation)) return;
-            SetCollection(result.Paths, result.Paths.Count > 0 ? result.Paths[0] : null, cancelDiscovery: false);
+            SetCollection(result.Paths, result.Paths.Count > 0 ? result.Paths[0] : null,
+                cancelDiscovery: false, listPath: listPath);
             _browserStatus = $"{Path.GetFileName(listPath)} · {result.Paths.Count:N0} images";
             if (result.SkippedCount > 0)
             {
@@ -192,7 +195,8 @@ public sealed partial class MainPage
         IReadOnlyList<string> paths,
         string? selectedPath,
         string? folderRoot = null,
-        bool cancelDiscovery = true)
+        bool cancelDiscovery = true,
+        string? listPath = null)
     {
         if (cancelDiscovery) CancelBrowserDiscovery();
         _thumbnailCancellation?.Cancel();
@@ -202,6 +206,7 @@ public sealed partial class MainPage
             _collapsedBrowserGroups.Clear();
         }
         _browserRoot = folderRoot;
+        _browserListPath = listPath;
         if (folderRoot is null) _browserStatus = null;
         _imagePaths.Clear();
         _imagePaths.AddRange(paths);
@@ -377,14 +382,17 @@ public sealed partial class MainPage
     private void UpdateBrowserControls()
     {
         if (!_browserInitialized) return;
-        string? root = _browserRoot ?? (_imagePaths.Count > 0 ? Path.GetDirectoryName(_imagePaths[0]) : null);
+        string? root = _browserListPath is not null ? null
+            : _browserRoot ?? (_imagePaths.Count > 0 ? Path.GetDirectoryName(_imagePaths[0]) : null);
         BrowserRootText.Text = root ?? string.Empty;
+        BrowserRootText.Visibility = _browserListPath is null ? Visibility.Visible : Visibility.Collapsed;
         ToolTipService.SetToolTip(BrowserRootText, root);
         BrowserSubfoldersCheckBox.Visibility = _browserRoot is not null ? Visibility.Visible : Visibility.Collapsed;
         BrowserGroupingHelpText.Text = _browserGrouping == ImageBrowserGrouping.Filter
             ? "Filters detected from image filenames. Unrecognized files appear under Other."
             : _browserGrouping == ImageBrowserGrouping.None ? string.Empty : "Select a group header to collapse or expand it.";
         BrowserStatusText.Text = _browserStatus ?? $"{BrowserItems.Count:N0} images";
+        ToolTipService.SetToolTip(BrowserStatusText, _browserListPath);
         BrowserScanProgress.IsActive = _isScanningFolder;
         BrowserScanProgress.Visibility = _isScanningFolder ? Visibility.Visible : Visibility.Collapsed;
         BrowserCancelScanButton.Visibility = _isScanningFolder ? Visibility.Visible : Visibility.Collapsed;
