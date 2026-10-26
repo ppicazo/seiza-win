@@ -90,7 +90,7 @@ public sealed partial class MainPage
         {
             ImagePathListResult result = await Task.Run(() => ImagePathList.Read(listPath, cancellation.Token), cancellation.Token);
             if (!IsCurrentBrowserDiscovery(cancellation)) return;
-            SetCollection(result.Paths, result.Paths.FirstOrDefault(), cancelDiscovery: false);
+            SetCollection(result.Paths, result.Paths.Count > 0 ? result.Paths[0] : null, cancelDiscovery: false);
             _browserStatus = $"{Path.GetFileName(listPath)} · {result.Paths.Count:N0} images";
             if (result.SkippedCount > 0)
             {
