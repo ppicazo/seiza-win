@@ -810,7 +810,7 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                     continue;
                 }
                 candidateSession = await ImageStackSession
-                    .ResumeAsync(candidate.ContextPath, cancellationToken)
+                    .ResumeAsync(candidate.ContextPath, _configuration.Options, cancellationToken)
                     .ConfigureAwait(false);
                 LiveStackNativeState nativeState = await candidateSession
                     .GetStateAsync(cancellationToken)
@@ -839,13 +839,13 @@ internal sealed class LiveStackCoordinator : IAsyncDisposable
                         candidate.State,
                         nativeState,
                         cancellationToken).ConfigureAwait(false);
-                bool savedGpu = ImageStackOptions.SavedUsesGpu(candidate.State.StackOptionsJson);
+                string restoredOptionsJson = _configuration.Options.ApplyGpuToSavedOptions(candidate.State.StackOptionsJson);
+                bool gpuPolicyChanged = !_configuration.Options.MatchesSavedGpuPolicy(candidate.State.StackOptionsJson);
                 _session = candidateSession;
                 candidateSession = null;
-                if (savedGpu != _configuration.Options.UseGpu)
-                    AddAttention("Resumed stack retains its saved GPU setting; Settings applies to new stacks.");
-                _configuration.Options.UseGpu = savedGpu;
-                _optionsJson = candidate.State.StackOptionsJson;
+                _optionsJson = restoredOptionsJson;
+                if (gpuPolicyChanged)
+                    AddAttention("Resumed stack uses current GPU settings; accumulated frames are preserved.");
                 RestoreState(candidate, nativeState, referenceSignature);
                 _alignmentReferencePath = nativeState.ReferenceImagePath;
                 SeedCalibrationPaths(_calibration);

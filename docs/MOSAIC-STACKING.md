@@ -1,7 +1,7 @@
 # Expanded mosaic stacking (development build)
 
 These controls are newer than Windows 0.8.5. They use published Seiza/C ABI
-0.42.0 and stacking 0.45.0; no Git or vendored core dependency is used.
+0.44.2 and stacking 0.51.2; no Git or vendored core dependency is used.
 
 ## GPU preference
 
@@ -13,13 +13,22 @@ falls back to CPU processing if a GPU operation is unavailable. Small frames may
 remain on the CPU even when enabled. GPU rounding can differ from CPU results;
 byte-identical outputs are not promised.
 
-Active and resumed live stacks retain their original setting. Changing the
-preference does not invalidate an otherwise compatible checkpoint or discard
-its accumulator; the resume notice explains when the saved mode differs from
-Settings. Other processing-option changes still require a compatible session.
-The preference persists immediately and across app restarts.
+**GPU planning budget (MiB)** defaults to **0 / automatic**, which uses the
+device's capacity. Set a smaller positive budget to leave room for other
+programs: a large accumulator moves onto the CPU sooner, and reintegration uses
+smaller bands. This is a planning budget, not a strict ceiling on allocations;
+other frame kernels, staging buffers and the idle pool can use more memory.
+Values above device capacity are clamped by the core. This is separate from the
+maximum canvas limit below.
 
-![Native Windows stacking GPU preference](images/stacking-gpu-settings.png)
+Active live stacks retain their settings. When reopening a saved stack, the app
+uses the **current GPU mode and budget** through the published GPU-resume API.
+An otherwise compatible checkpoint keeps its accumulator, frame counts and
+configuration fingerprint; a notice explains a policy change. New checkpoints
+record the new policy. Processing-option changes still require a compatible
+session. Both preferences persist immediately and across app restarts.
+
+![Native Windows GPU mode and planning-budget controls](images/stacking-gpu-budget-settings.png)
 
 ## Selecting panels automatically
 
@@ -78,9 +87,12 @@ Open **Stack**, select the complete set of light frames, then choose **Canvas**:
   every other light. The default minimum overlap becomes 5%. Custom overlap
   values are retained when switching modes.
 
-Existing **Similarity**, **Affine**, **Quadratic**, normalization, weighting,
-calibration and transient-removal controls remain available. Quadratic follows
-field distortion. Published stacking 0.44.0 includes the expanded Local background
+Existing **Similarity**, **Affine**, **Quadratic**, weighting, calibration and
+transient-removal controls remain available. Expanded canvases support **None**,
+**Global**, and **Local background** normalization. **Local** requires a fixed
+canvas; choosing it for a mosaic disables starting the run and explains the
+alternative before any inputs are read. Quadratic follows field distortion.
+Earlier published stacking 0.44.0 includes the expanded Local background
 sky/color fix and improved mild-lens distortion fitting.
 Planning/lens notes appear in the completion summary,
 including lights that did not join the plan. Per-light rejections are still
@@ -138,6 +150,19 @@ the earlier compiler; these follow-up figures are not a controlled compiler
 comparison or a cold-start claim.
 
 ## Adoption and review notes
+
+The 0.44.2 adoption includes the GPU memory planner, ahead-of-time frame
+preparation, parallel blind-registration scoring, early expanded/Local
+normalization rejection, and RC-Astro's Windows console-window fix. The app
+uses the published GPU-resume export to apply current policy to existing
+accumulators. A native 0.42.0 checkpoint reopened under 0.44.2 with unchanged
+dimensions, counts, source ledger and configuration fingerprint after changing
+to CPU-only with a 4096 MiB budget.
+
+This update covers the existing raw-light stacking workflows and adds the
+[narrowband, continuum and RGB star tools](COLOR-TOOLS.md). The newer
+registered-panel background-matching API takes already aligned panel
+integrations; it does not run implicitly on raw-light mosaic stacks.
 
 The C ABI SNR result grew an appended `bin_factor` field in 0.40. The Windows
 binding now reserves the full 80-byte x64 struct, with a regression test for

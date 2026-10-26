@@ -66,6 +66,8 @@
     <Compile Include="..\..\src\Seiza.App\Services\StackReferenceService.cs" Link="Services\StackReferenceService.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\StackDefectService.cs" Link="Services\StackDefectService.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\ColorWorkflowService.cs" Link="Services\ColorWorkflowService.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\ColorToolsService.cs" Link="Services\ColorToolsService.cs" />
+    <Compile Include="..\..\src\Seiza.App\Models\ColorTools.cs" Link="Models\ColorTools.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\ImageStackSession.cs" Link="Models\ImageStackSession.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\ImageMetadata.cs" Link="Models\ImageMetadata.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\CatalogStatus.cs" Link="Models\CatalogStatus.cs" />

@@ -14,6 +14,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     private readonly IReadOnlyList<StackFrameChoice> _frames;
     private readonly string? _browserRoot;
     private readonly Func<bool> _useGpuSetting;
+    private readonly Func<int?> _gpuMemorySetting;
     private readonly Dictionary<string, string> _referencePaths = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string[]> _rankedReferencePaths = new(StringComparer.Ordinal);
     private readonly TaskCompletionSource<ImageStackBatchResult?> _completion = new(
@@ -38,9 +39,11 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     private string? _calibrationLibraryPath;
     private string? _alignmentReferencePath;
 
-    internal ImageStackWindow(IReadOnlyList<string> paths, string? browserRoot = null, Func<bool>? useGpuSetting = null)
+    internal ImageStackWindow(IReadOnlyList<string> paths, string? browserRoot = null, Func<bool>? useGpuSetting = null,
+        Func<int?>? gpuMemorySetting = null)
     {
         _useGpuSetting = useGpuSetting ?? (() => CatalogSettingsStore.LoadUseGpuForStacking());
+        _gpuMemorySetting = gpuMemorySetting ?? (() => CatalogSettingsStore.LoadStackingGpuMemoryMib());
         InitializeComponent();
         _browserRoot = browserRoot;
         MinimumWeightBox.Value = new ImageStackOptions().MinimumWeight;
@@ -466,6 +469,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         _calibration.DarkExposureSeconds = DarkExposureBox.Value;
 
         string? message = ValidationMessage(CreateOptions());
+        if (message is not null) FooterHintText.Text = message;
         ValidationInfoBar.Severity = InfoBarSeverity.Error;
         ValidationInfoBar.Message = message ?? string.Empty;
         ValidationInfoBar.IsOpen = message is not null;
@@ -526,6 +530,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     private ImageStackOptions CreateOptions() => new()
     {
         UseGpu = _useGpuSetting(),
+        GpuMemoryMib = _gpuMemorySetting(),
         CanvasMode = SelectedTag(CanvasModePicker) == "Expanded" ? StackCanvasMode.Expanded : StackCanvasMode.Reference,
         MaximumCanvasMegasamples = CheckedInt(CanvasLimitBox.Value),
         RegistrationModel = SelectedTag(RegistrationModelPicker) switch

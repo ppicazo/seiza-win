@@ -123,8 +123,8 @@ Native sidebar controls shown with synthetic sample images.
 
 ## In development: faster solving and expanded mosaic stacks
 
-The development build adopts published Seiza/C ABI **0.42.0**, stacking
-**0.45.0**, parallax **0.19.0**, and image-io **0.11.0**. Blind solving now uses
+The development build adopts published Seiza/C ABI **0.44.2**, stacking
+**0.51.2**, parallax **0.19.2**, and image-io **0.11.0**. Blind solving now uses
 Seiza's faster candidate search and full-catalog refinement. In an earlier local
 0.40.1 warm-cache comparison against 0.39.0, Tulip solved in **0.35 s instead of
 2.02 s**, and Big Q in **0.65 s instead of 2.67 s**, with lower RMS.
@@ -143,9 +143,18 @@ measurements, and compatibility details. These changes are not in 0.8.5.
 **Settings → Stacking performance → Use GPU for stacking** controls acceleration
 for new batch and live stacks, including defect learning and reintegration.
 It defaults to automatic GPU use; turn it off for CPU-only processing. Small
-frames and unavailable GPU operations fall back to the CPU. Active and resumed
-live stacks keep their original mode; the preference is remembered across app
-restarts. GPU and CPU floating-point results need not be byte-identical.
+frames and unavailable GPU operations fall back to the CPU. **GPU planning
+budget** lets you reserve room for other programs; 0 uses the device capacity.
+It controls accumulator placement and reintegration bands, rather than imposing
+a hard allocation ceiling. Active stacks keep their settings; resumed stacks
+use the current GPU mode and budget while preserving accumulated frames. Both
+preferences survive app restarts. GPU and CPU floating-point results need not
+be byte-identical.
+
+Expanded canvases reject **Local** normalization before planning; use **Local
+background**, **Global**, or **None**. The updated core also prepares planning
+frames ahead, scores blind registration candidates in parallel, and runs
+RC-Astro tools without opening console windows on Windows.
 
 | Solve and group input lights | Review panels and individual exposures |
 | --- | --- |
@@ -153,7 +162,7 @@ restarts. GPU and CPU floating-point results need not be byte-identical.
 
 | Expanded canvas controls | Persistent GPU preference |
 | --- | --- |
-| ![Expanded mosaic canvas selection and memory ceiling in the native Windows stacking dialog](docs/images/mosaic-stacking/readme-canvas.png) | ![Native Windows Settings showing automatic GPU acceleration for stacking](docs/images/stacking-gpu-settings.png) |
+| ![Expanded mosaic canvas selection and memory ceiling in the native Windows stacking dialog](docs/images/mosaic-stacking/readme-canvas.png) | ![Native Windows Settings showing GPU acceleration and its planning budget](docs/images/stacking-gpu-budget-settings.png) |
 
 These are native UI captures from the development build. The panel examples use
 crops and repeated copies of an M31 image to demonstrate selection, not
@@ -364,6 +373,18 @@ success. Calibrated files retain their WCS and a `SEIZAPCC=GAIA` marker.
 Seiza uses linked RGB or luminance-preserving stretches for marked files on
 reopen, preview and display export, keeping their calibrated color balance.
 An already marked image cannot be calibrated again; use its original stack.
+
+The **Narrowband, continuum and RGB stars…** button opens the new color tools:
+HOO/SHO display balance with optional broadband structure and green reduction,
+validated stellar continuum fitting and signed linear subtraction, independent
+RGB star stretching, and restoration of either linear-extracted or already
+prepared stars. Inputs must be registered FITS/XISF snapshots. Fits are reviewed
+before subtraction and saved plans are bound to exact source hashes. Display
+results reopen with No Stretch and an explicit 0–1 range; continuum residuals
+remain linear, including negative values. See [Color tools](docs/COLOR-TOOLS.md)
+for the required input scales, clipping information and fit reports.
+Current adoption checks and smoke-test timings are recorded in
+[Windows validation](docs/SEIZA-0442-VALIDATION.md).
 
 Directory and live stacking also offer **Learn sensor defects from dithered
 lights (no master dark)**. This opt-in native hot/dead-pixel map needs at least

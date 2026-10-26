@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Xaml;
+using System.Text.Json;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Seiza.App.Models;
@@ -1168,7 +1169,7 @@ public sealed partial class MainPage : Page, IDisposable
         }
         FitsImageProcessingConfiguration processing = processingOverride ??
             (isNewImage
-                ? FitsImageProcessingConfiguration.Default
+                ? ColorWorkflowService.InitialProcessingFor(path)
                 : CurrentProcessing());
         if (!preserveSolution || ViewModel.IsSolving)
         {
@@ -1214,7 +1215,7 @@ public sealed partial class MainPage : Page, IDisposable
             _currentMetadata = image.Metadata;
             if (isNewImage && processingOverride is null)
             {
-                _processingHistory.Reset();
+                _processingHistory.Reset(processing);
             }
             InspectorControl.ShowMetadata(image.Metadata, processing);
             ViewModel.CompleteLoading(path, image.Metadata);
@@ -1277,8 +1278,13 @@ public sealed partial class MainPage : Page, IDisposable
         ImageCanvas.Invalidate();
     }
 
-    private FitsImageProcessingConfiguration CurrentProcessing(bool interactivePreview = false) =>
-        _processingHistory.Current.Clone(interactivePreview);
+    private FitsImageProcessingConfiguration CurrentProcessing(bool interactivePreview = false)
+    {
+        var processing = _processingHistory.Current.Clone(interactivePreview);
+        processing.PreserveDisplaySamples = _currentMetadata?.Headers.TryGetValue("SEIZATRF", out JsonElement transfer) == true &&
+            transfer.ValueKind == JsonValueKind.String && transfer.GetString() == "DISPLAY";
+        return processing;
+    }
 
     private void SetCommittedBitmap(CanvasBitmap bitmap)
     {

@@ -117,6 +117,13 @@ public partial class App : Application
         window.Activate();
     }
 
+    internal static void ShowColorTools()
+    {
+        var window = new ColorToolsWindow();
+        RegisterIndependentWindow(window);
+        window.Activate();
+    }
+
     private static void RegisterIndependentWindow(Window window)
     {
         if (IndependentWindows.Add(window)) window.Closed += IndependentWindow_Closed;

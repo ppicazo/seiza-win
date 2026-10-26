@@ -227,23 +227,34 @@ internal sealed class ImageStackSession : IDisposable, IAsyncDisposable
 
     public static Task<ImageStackSession> ResumeAsync(
         string contextPath,
+        CancellationToken cancellationToken = default) => ResumeAsync(contextPath, null, cancellationToken);
+
+    public static Task<ImageStackSession> ResumeAsync(
+        string contextPath,
+        ImageStackOptions? gpuOptions,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(contextPath);
         string fullContextPath = Path.GetFullPath(contextPath);
+        string? gpuJson = gpuOptions?.ToGpuJson();
 
         return Task.Run(() =>
         {
-            nint error = 0;
-            nint rawHandle = NativeMethods.OpenLiveStackerContext(fullContextPath, out error);
-            if (rawHandle == 0)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (gpuJson is not null) StackingCoreCapabilities.Current.RequireGpuResume();
+            nint error;
+            nint rawHandle = gpuJson is null
+                ? NativeMethods.OpenLiveStackerContext(fullContextPath, out error)
+                : NativeMethods.OpenLiveStackerContextWithGpu(fullContextPath, gpuJson, out error);
+            var handle = new SafeLiveStackerHandle(rawHandle);
+            try
             {
-                throw NativeString.TakeError(
-                    error,
-                    "The Seiza core could not resume the saved stack.");
+                Exception? failure = error == 0 ? null : NativeString.TakeError(error, "The Seiza core could not resume the saved stack.");
+                cancellationToken.ThrowIfCancellationRequested();
+                if (handle.IsInvalid) throw failure ?? new SeizaCoreException("The Seiza core could not resume the saved stack.");
+                return new ImageStackSession(handle);
             }
-            FreeUnexpectedError(error);
-            return new ImageStackSession(new SafeLiveStackerHandle(rawHandle));
+            catch { handle.Dispose(); throw; }
         }, cancellationToken);
     }
 

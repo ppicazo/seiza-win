@@ -29,8 +29,10 @@ internal enum StackRejectionMode
 
 internal sealed class ImageStackOptions
 {
+    public const int MaximumGpuMemoryMib = 1_048_576;
     private double? _minimumOverlap;
     public bool UseGpu { get; set; } = true;
+    public int? GpuMemoryMib { get; set; }
     // Diagnostic only; normal app requests leave tracing off.
     internal bool TraceGpu { get; set; }
     // Host-side planning policy, not part of the native StackOptions JSON.
@@ -103,6 +105,14 @@ internal sealed class ImageStackOptions
             if (CanvasMode == StackCanvasMode.Expanded && CfaIntegration == StackCfaIntegration.BayerDrizzle)
             {
                 return "Expanded mosaic canvases do not support Bayer drizzle. Choose demosaiced integration.";
+            }
+            if (CanvasMode == StackCanvasMode.Expanded && Normalization == StackNormalizationMode.Local)
+            {
+                return "Expanded mosaic canvases do not support Local normalization. Choose Local background, Global, or None.";
+            }
+            if (GpuMemoryMib is < 1 or > MaximumGpuMemoryMib)
+            {
+                return $"Choose a GPU memory budget between 1 and {MaximumGpuMemoryMib} MiB, or automatic.";
             }
             if (Normalization is StackNormalizationMode.Local or StackNormalizationMode.LocalBackground &&
                 LocalTileSize < 16)
@@ -195,7 +205,7 @@ internal sealed class ImageStackOptions
                 StackDemosaic.Mhc => "mhc",
                 StackDemosaic.Bilinear => "bilinear",
                 _ => null,
-            }, LearnedDefects, UseGpu && !TraceGpu ? null : new StackGpuPayload(UseGpu, TraceGpu));
+            }, LearnedDefects, UseGpu && !TraceGpu && GpuMemoryMib is null ? null : GpuPayload());
         return JsonSerializer.Serialize(
             payload,
             SeizaJsonSerializerContext.Default.StackOptionsPayload);
@@ -207,6 +217,43 @@ internal sealed class ImageStackOptions
         return options["gpu"]?["enabled"]?.GetValue<bool>() ?? true;
     }
 
+    internal bool MatchesSavedGpuPolicy(string json)
+    {
+        var gpu = JsonNode.Parse(json)!["gpu"];
+        return (gpu?["enabled"]?.GetValue<bool>() ?? true) == UseGpu &&
+            (gpu?["trace"]?.GetValue<bool>() ?? false) == TraceGpu &&
+            gpu?["memory_bytes"]?.GetValue<ulong>() == GpuPayload().MemoryBytes;
+    }
+
+    private StackGpuPayload GpuPayload() => new(UseGpu, TraceGpu,
+        GpuMemoryMib is int mib ? checked((ulong)mib * 1_048_576) : null);
+
+    internal string ToGpuJson()
+    {
+        if (GpuMemoryMib is < 1 or > MaximumGpuMemoryMib)
+            throw new ArgumentOutOfRangeException(nameof(GpuMemoryMib));
+        return JsonSerializer.Serialize(GpuPayload(), SeizaJsonSerializerContext.Default.StackGpuPayload);
+    }
+
+    internal string ApplyGpuToSavedOptions(string json)
+    {
+        var saved = JsonNode.Parse(json)!.AsObject();
+        saved["gpu"] = JsonNode.Parse(ToGpuJson());
+        return saved.ToJsonString();
+    }
+
+    private static void ValidateSavedGpu(JsonNode? node)
+    {
+        if (node is null) return;
+        var gpu = node.AsObject();
+        foreach (string key in new[] { "enabled", "trace", "defects", "debayer", "detection", "resampling", "accumulator", "integration" })
+            if (gpu.ContainsKey(key)) _ = gpu[key]?.GetValue<bool>() ?? throw new JsonException("Invalid GPU flag.");
+        if (gpu["memory_bytes"] is JsonNode memory && memory.GetValue<ulong>() == 0)
+            throw new JsonException("GPU memory budget must be positive.");
+        if (gpu.ContainsKey("concurrency") && (gpu["concurrency"]?.GetValue<uint>() ?? 0) == 0)
+            throw new JsonException("GPU concurrency must be positive.");
+    }
+
     internal static bool SameProcessingOptions(string left, string right)
     {
         try
@@ -214,8 +261,8 @@ internal sealed class ImageStackOptions
             JsonObject a = JsonNode.Parse(left)!.AsObject(), b = JsonNode.Parse(right)!.AsObject();
             // Validate the saved execution-policy shape before a checkpoint is
             // opened, even though it does not change processing compatibility.
-            _ = a["gpu"]?["enabled"]?.GetValue<bool>();
-            _ = b["gpu"]?["enabled"]?.GetValue<bool>();
+            ValidateSavedGpu(a["gpu"]);
+            ValidateSavedGpu(b["gpu"]);
             a.Remove("gpu"); b.Remove("gpu");
             return JsonNode.DeepEquals(a, b);
         }
@@ -756,7 +803,8 @@ internal sealed record StackOptionsPayload(
 
 internal sealed record StackGpuPayload(
     [property: JsonPropertyName("enabled")] bool Enabled,
-    [property: JsonPropertyName("trace"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Trace = false);
+    [property: JsonPropertyName("trace"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Trace = false,
+    [property: JsonPropertyName("memory_bytes"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ulong? MemoryBytes = null);
 
 internal sealed record StackCosmeticPayload(
     [property: JsonPropertyName("low_sigma")] double LowSigma,

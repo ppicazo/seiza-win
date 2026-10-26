@@ -3,6 +3,7 @@
 //! hashing and atomic installation still come from seiza-download.
 use seiza::catalog::{ObjectDistances, StarDistanceCatalog};
 mod color;
+mod color_tools;
 mod sky_overlap;
 use seiza::objects::ObjectCatalog;
 use seiza_download::{
