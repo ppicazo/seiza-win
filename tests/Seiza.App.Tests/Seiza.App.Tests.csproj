@@ -11,6 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\Seiza.App\Services\ImagePathList.cs" Link="Services\ImagePathList.cs" />
     <Compile Include="..\..\src\Seiza.App\Services\WindowsShortcutTarget.cs" Link="Services\WindowsShortcutTarget.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\LiveStackOverviewItem.cs" Link="Models\LiveStackOverviewItem.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\DeferredSettingsUpdate.cs" Link="Models\DeferredSettingsUpdate.cs" />

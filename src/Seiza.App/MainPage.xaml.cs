@@ -107,6 +107,22 @@ public sealed partial class MainPage : Page, IDisposable
         }
     }
 
+    private async void OpenImageList_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string? path = await ImageFileService.PickImageListAsync(OwnerWindowHandle);
+            if (path is not null && !_disposed)
+            {
+                await App.OpenImageListInWindowAsync(path, _ownerWindow);
+            }
+        }
+        catch (Exception exception)
+        {
+            if (!_disposed) ViewModel.ErrorMessage = DescribeException(exception);
+        }
+    }
+
     private async void OpenFolder_Click(object sender, RoutedEventArgs e)
     {
         string? path = await ImageFileService.PickFolderAsync(OwnerWindowHandle);

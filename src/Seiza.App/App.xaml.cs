@@ -95,6 +95,15 @@ public partial class App : Application
         window.Activate();
     }
 
+    internal static async Task OpenImageListInWindowAsync(string path, MainWindow? preferredWindow = null)
+    {
+        MainWindow window = preferredWindow is not null &&
+            DocumentWindows.Contains(preferredWindow) && !preferredWindow.HasDocument
+                ? preferredWindow : CreateDocumentWindow();
+        await window.OpenImageListAsync(path);
+        window.Activate();
+    }
+
     public static void ShowCatalogSettings()
     {
         if (_catalogSettingsWindow is null)

@@ -23,7 +23,7 @@ public sealed partial class MainPage
     private bool _isScanningFolder;
     private bool _browserInitialized;
 
-    private bool CanBrowseImages => _browserRoot is not null || BrowserItems.Count > 1;
+    private bool CanBrowseImages => _browserRoot is not null || _browserStatus is not null || BrowserItems.Count > 1;
 
     private void InitializeImageBrowser()
     {
@@ -81,6 +81,37 @@ public sealed partial class MainPage
 
     internal Task OpenFolderAsync(string folderPath) =>
         ScanBrowserFolderAsync(folderPath, _currentPath);
+
+    internal async Task OpenImageListAsync(string listPath)
+    {
+        if (_disposed) return;
+        var cancellation = BeginBrowserDiscovery();
+        try
+        {
+            ImagePathListResult result = await Task.Run(() => ImagePathList.Read(listPath, cancellation.Token), cancellation.Token);
+            if (!IsCurrentBrowserDiscovery(cancellation)) return;
+            SetCollection(result.Paths, result.Paths.FirstOrDefault(), cancelDiscovery: false);
+            _browserStatus = $"{Path.GetFileName(listPath)} · {result.Paths.Count:N0} images";
+            if (result.SkippedCount > 0)
+            {
+                _browserStatus += $" · {result.SkippedCount:N0} missing, invalid or unsupported entries skipped";
+            }
+            _isBrowserOpen = true;
+            ViewModel.ErrorMessage = result.Paths.Count == 0 ? "The list contains no existing supported images." : null;
+            UpdateNavigationState();
+            UpdateVisualState();
+            if (_selectedIndex >= 0) await LoadImageAsync(_imagePaths[_selectedIndex]);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            if (IsCurrentBrowserDiscovery(cancellation)) ViewModel.FailLoading(DescribeException(exception));
+        }
+        finally
+        {
+            FinishBrowserDiscovery(cancellation);
+        }
+    }
 
     private async Task ScanBrowserFolderAsync(
         string folderPath, string? preferredPath, bool preserveCurrentImage = false)
