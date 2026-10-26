@@ -76,7 +76,14 @@ internal static partial class ColorToolsService
     private static string Summary(ColorToolsRequest request, string status, JsonObject report)
     {
         if (status == "skipped") return "Fit skipped: " + report["detail"]?.GetValue<string>() + " No output was changed.";
-        if (status == "fitted") return "Stellar fit passed validation. Review coefficients, held-out residuals and PSF resolution below before saving.";
+        if (status == "fitted")
+        {
+            string coefficients = string.Join(", ", report["plan"]!["coefficients"]!.AsArray()
+                .Select(value => value!.GetValue<double>().ToString("G6", System.Globalization.CultureInfo.InvariantCulture)));
+            var diagnostics = report["plan"]!["diagnostics"]!;
+            string rms = diagnostics["validationFractionalRms"]!.GetValue<double>().ToString("G3", System.Globalization.CultureInfo.InvariantCulture);
+            return $"Fit validated. Coefficients: {coefficients}. {diagnostics["validationStars"]} validation stars; fractional RMS {rms}. Review before building the subtraction preview.";
+        }
         if (request.Tool == ColorTool.Continuum)
             return "Saved signed linear continuum residuals. Negative samples and missing coverage are preserved; no display stretch or hidden pedestal was applied.";
         string message = "Saved a display-referred image. Reopening starts with No Stretch; the scientific linear sources are unchanged.";
@@ -87,6 +94,36 @@ internal static partial class ColorToolsService
             if (skipped.Length > 0) message += " Balance skipped for " + string.Join("; ", skipped) + ".";
         }
         return message;
+    }
+
+    public static async Task SaveImageAsync(ColorToolsResult preview, ColorToolsRequest request, string path, CancellationToken token = default)
+    {
+        if (preview.Output is null || !File.Exists(preview.Output)) throw new InvalidOperationException("Build a preview before saving.");
+        request = request with { Inputs = [.. request.Inputs], ClippingMasks = [.. request.ClippingMasks] };
+        void Protect()
+        {
+            request.ProtectDestination(path);
+            if (StackSourceIdentity.RefersToSameFile(preview.Output, path)) throw new InvalidOperationException("Choose a separate destination for the built image.");
+        }
+        Protect();
+        string staging = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, ".seiza-color-save-" + Guid.NewGuid().ToString("N"));
+        await Gate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            Directory.CreateDirectory(staging);
+            string temporary = Path.Combine(staging, "result" + Path.GetExtension(path));
+            await Task.Run(() =>
+            {
+                token.ThrowIfCancellationRequested();
+                var json = new JsonObject { ["operation"] = "copy-result", ["inputs"] = new JsonArray(JsonValue.Create(preview.Output)), ["output"] = temporary };
+                nint result = Process(json.ToJsonString(), out nint error);
+                try { if (result == 0) throw new SeizaCoreException(Marshal.PtrToStringUTF8(error) ?? "Could not save the built image."); }
+                finally { if (result != 0) Free(result); if (error != 0) Free(error); }
+                token.ThrowIfCancellationRequested(); Protect();
+                File.Move(temporary, path, overwrite: true);
+            }, CancellationToken.None).ConfigureAwait(false);
+        }
+        finally { try { if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true); } finally { Gate.Release(); } }
     }
 
     public static async Task SaveReportAsync(ColorToolsResult result, ColorToolsRequest request, string path, CancellationToken token = default)

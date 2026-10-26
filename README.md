@@ -379,8 +379,11 @@ HOO/SHO display balance with optional broadband structure and green reduction,
 validated stellar continuum fitting and signed linear subtraction, independent
 RGB star stretching, and restoration of either linear-extracted or already
 prepared stars. Inputs must be registered FITS/XISF snapshots. Fits are reviewed
-before subtraction and saved plans are bound to exact source hashes. Display
-results reopen with No Stretch and an explicit 0–1 range; continuum residuals
+before subtraction and saved plans are bound to exact source hashes.
+The dialog shows required sources first, with optional processing settings
+collapsed. **Build preview**, review the image, then **Save image…**;
+continuum analysis shows its fit before building the subtraction preview.
+Display results reopen with No Stretch and an explicit 0–1 range; continuum residuals
 remain linear, including negative values. See [Color tools](docs/COLOR-TOOLS.md)
 for the required input scales, clipping information and fit reports.
 Current adoption checks and smoke-test timings are recorded in

@@ -529,6 +529,34 @@ fn run(request: Request) -> Result<Value, String> {
         .chain(request.clipping_masks.iter().flatten())
         .map(|path| Ok((path, hash(path)?)))
         .collect::<Result<Vec<_>, String>>()?;
+    if request.operation == "copy-result" {
+        if inputs.len() != 1 {
+            return Err("Choose one built preview to save.".into());
+        }
+        if hash(&inputs[0].path)? != inputs[0].revision {
+            return Err("The built preview changed before saving.".into());
+        }
+        // The processed-image writer intentionally copies only observation/WCS
+        // metadata. A format-only save must explicitly carry our transfer and
+        // provenance cards too, or reopening a display result stretches again.
+        let provenance: Vec<_> = inputs[0]
+            .frame
+            .headers
+            .iter()
+            .filter(|(key, _)| key.starts_with("SEIZA"))
+            .map(|(key, value)| WriteHeaderCard::new(key.clone(), value.clone()))
+            .collect();
+        seiza_stacking::write_processed_image_fits_f32(
+            request.output.as_ref().unwrap(),
+            &inputs[0].frame.image,
+            &inputs[0].frame.headers,
+            &provenance,
+        )
+        .map_err(|e| e.to_string())?;
+        return Ok(
+            json!({"status":"success","operation":"copy-result","sourceSha256":inputs[0].revision}),
+        );
+    }
     let (image, mut report, display) = match request.operation.as_str() {
         "narrowband" => {
             let (image, report) = narrowband(&request, &inputs)?;

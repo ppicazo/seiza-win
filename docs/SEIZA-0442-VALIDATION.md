@@ -62,17 +62,39 @@ FITS and XISF display outputs preserve the expected colors through the app's
 preview renderer. Failure and pre-cancellation preserve existing outputs;
 reports cannot replace a source, plan or result.
 
-The production native color window launches and exposes the new controls.
-Interactive picker/processing UI validation remains limited: Windows computer
-use twice returned `failed to activate captured window`. The color service
-and native scientific paths were tested directly; a complete interactive
-color workflow is not claimed.
+The production native color controls were exercised interactively in a
+diagnostic entry point that bypasses single-instance activation routing.
+All five workflows built visible previews using owned synthetic FITS/XISF
+fixtures: HOO, continuum subtraction, RGB star extraction, restoration from
+original/starless RGB, and restoration from a prepared display stars layer.
+Native file pickers saved FITS and XISF, and a saved display result reopened
+with No Stretch. These are UI/scientific smoke checks, not real telescope
+color-quality validation.
+
+The dialog now follows the PSF Guard preview-first pattern: required sources
+and common controls are visible, optional processing/fit controls start
+collapsed, and saving follows preview review. Input changes disable saving
+stale previews. Automatic analysis with unknown saturation visibly skipped;
+with producer ceilings it recovered 0.7 using 168 fit and 57 validation stars
+(validation fractional RMS 8.71e-9). Its report was saved and replayed.
+Importing that report into an empty form restored both source paths and
+65535 saturation ceilings, reset input confirmation, and successfully rebuilt
+the residual. Delayed WinUI field events no longer discard the imported plan;
+editing a source still disables both plan-based building and stale saving.
+The saved residual retained its LINEAR marker and ranged from -6.77149e-5
+to 9.03689e-5, with all eight fixture source hashes unchanged.
+Wide and narrow window layouts were inspected; the narrow form scrolls
+above its preview while the status and actions remain visible.
+Interactive saving exposed a transfer-header loss in format conversion;
+the adapter now explicitly preserves SEIZA transfer/provenance cards.
+Regression checks cover both FITS/XISF directions, unchanged reviewed pixels
+even when original sources change, and negative/NaN preservation.
 
 ## Checks
 
 - Release solution build: zero warnings/errors.
 - Unsigned MSI build and static Finish/Shell sequencing check pass; no install.
-- Managed suite: 788 passed.
+- Managed suite: 789 passed.
 - Windows suite: 78 passed, 4 optional real-source/encoder tests skipped.
 - Windows platform adapter: 22 passed; Explorer provider: 30 passed.
 - Published native suites: C ABI 145; stacking unit 503 (5 ignored), caller-pool

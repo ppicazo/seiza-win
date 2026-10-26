@@ -69,7 +69,7 @@ public sealed class ColorToolsTests : IDisposable
     {
         var request = new ColorToolsRequest { Tool = ColorTool.RestorePreparedStars, Aligned = true,
             Inputs = [Image("stars", 3, .2f, .4f, .6f), Image("nebula", 3, .1f, .2f, .3f)], Output = Path.Combine(_root, "display" + extension) };
-        await ColorToolsService.RunAsync(request);
+        var built = await ColorToolsService.RunAsync(request);
         var initial = ColorWorkflowService.InitialProcessingFor(request.Output!);
         Assert.True(initial.PreserveDisplaySamples);
         Assert.All(initial.StretchStack.Stages, stage => Assert.Equal(FitsStretchType.Identity, stage.Type));
@@ -85,6 +85,10 @@ public sealed class ColorToolsTests : IDisposable
         Assert.InRange(BinaryPrimitives.ReadUInt16LittleEndian(exported.RgbaBytes.AsSpan(2)), (ushort)34076, (ushort)34080);
         Assert.InRange(BinaryPrimitives.ReadUInt16LittleEndian(exported.RgbaBytes.AsSpan(4)), (ushort)47183, (ushort)47187);
         Assert.False(ColorWorkflowService.InitialProcessingFor(request.Inputs[0]).PreserveDisplaySamples);
+        string savedCopy = Path.Combine(_root, "saved" + (extension == ".fits" ? ".xisf" : ".fits"));
+        await ColorToolsService.SaveImageAsync(built, request, savedCopy);
+        Assert.True(ColorWorkflowService.HasDisplayTransfer(savedCopy));
+        Assert.Equal(preview.Bgra, SeizaCore.Render(savedCopy).Bgra);
     }
 
     [Fact]
@@ -115,6 +119,30 @@ public sealed class ColorToolsTests : IDisposable
         Assert.False(json.RootElement.TryGetProperty("starAmount", out _));
         Assert.False(json.RootElement.TryGetProperty("targetMedian", out _));
         Assert.False(json.RootElement.TryGetProperty("saturations", out _));
+    }
+
+    [Fact]
+    public async Task SavingPreviewCopiesBuiltSamplesAcrossFormatsAndDoesNotRecomputeChangedSources()
+    {
+        var request = Continuum();
+        var preview = await ColorToolsService.RunAsync(request);
+        string copy = Path.Combine(_root, "reviewed.xisf");
+        Image("nb", 1, 100, 300, 5, -200);
+        await ColorToolsService.SaveImageAsync(preview, request, copy);
+        Assert.Equal("XISF0100", Encoding.ASCII.GetString(File.ReadAllBytes(copy), 0, 8));
+        Assert.False(ColorWorkflowService.HasDisplayTransfer(copy));
+        Assert.Equal("LINEAR", SeizaCore.Render(copy).Metadata.Headers["SEIZATRF"].GetString());
+        string roundTrip = Path.Combine(_root, "reviewed.fits");
+        await ColorToolsService.SaveImageAsync(preview with { Output = copy }, request, roundTrip);
+        var original = File.ReadAllBytes(preview.Output!);
+        var saved = File.ReadAllBytes(roundTrip);
+        // Both files have complete FITS headers in the first 2880-byte block.
+        Assert.Equal(original.AsSpan(2880).ToArray(), saved.AsSpan(2880).ToArray());
+        File.WriteAllText(copy, "keep");
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ColorToolsService.SaveImageAsync(preview, request, copy, new CancellationToken(true)));
+        Assert.Equal("keep", File.ReadAllText(copy));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ColorToolsService.SaveImageAsync(preview, request, request.Inputs[0]));
+        Assert.Empty(Directory.EnumerateDirectories(_root, ".seiza-color-save-*"));
     }
     public void Dispose() => Directory.Delete(_root, recursive: true);
 }
