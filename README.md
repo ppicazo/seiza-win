@@ -140,6 +140,11 @@ registration and normalization choices, and visible planning/lens notes. See the
 [mosaic stacking guide and validation notes](docs/MOSAIC-STACKING.md) for limits,
 measurements, and compatibility details. These changes are not in 0.8.5.
 
+The development viewer also opens mosaics wider or taller than 16,384 pixels
+using on-demand GPU tiles at full resolution. Clipboard and image exports avoid
+an oversized GPU bitmap, including when exporting overlays. CPU memory and
+output-format limits still apply.
+
 **Settings → Stacking performance → Use GPU for stacking** controls acceleration
 for new batch and live stacks, including defect learning and reintegration.
 It defaults to automatic GPU use; turn it off for CPU-only processing. Small

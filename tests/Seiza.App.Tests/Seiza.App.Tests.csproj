@@ -82,6 +82,9 @@
     <Compile Include="..\..\src\Seiza.App\Models\LiveStackRun.cs" Link="Models\LiveStackRun.cs" />
     <Compile Include="..\..\src\Seiza.App\Models\StackSnrPresentation.cs" Link="Models\StackSnrPresentation.cs" />
     <Compile Include="..\..\src\Seiza.App\Rendering\ImageSpaceTransform.cs" Link="Rendering\ImageSpaceTransform.cs" />
+    <Compile Include="..\..\src\Seiza.App\Rendering\ImageTileLayout.cs" Link="Rendering\ImageTileLayout.cs" />
+    <Compile Include="..\..\src\Seiza.App\Rendering\BgraBitmapStream.cs" Link="Rendering\BgraBitmapStream.cs" />
+    <Compile Include="..\..\src\Seiza.App\Services\Bgra8Compositor.cs" Link="Services\Bgra8Compositor.cs" />
     <Compile Include="..\..\src\Seiza.App\Rendering\OverlayOptions.cs" Link="Rendering\OverlayOptions.cs" />
     <Compile Include="..\..\src\Seiza.App\Rendering\StarAnalysisOverlayLifecycle.cs" Link="Rendering\StarAnalysisOverlayLifecycle.cs" />
     <Compile Include="..\..\src\Seiza.App\Rendering\StarAnalysisOverlayGeometry.cs" Link="Rendering\StarAnalysisOverlayGeometry.cs" />

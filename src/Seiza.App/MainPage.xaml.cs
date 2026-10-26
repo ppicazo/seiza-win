@@ -13,14 +13,13 @@ using Seiza.App.Services;
 using Seiza.App.ViewModels;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
-using Windows.Graphics.DirectX;
 using Windows.Storage;
 
 namespace Seiza.App;
 
 public sealed partial class MainPage : Page, IDisposable
 {
-    private const float MinimumScale = 0.01f;
+    private const float MinimumScale = 0.000001f;
     private const float MaximumScale = 64.0f;
 
     private readonly List<string> _imagePaths = [];
@@ -28,8 +27,8 @@ public sealed partial class MainPage : Page, IDisposable
     private readonly OverlayScene _overlayScene = new();
     private readonly FitsImageProcessingHistory _processingHistory = new();
 
-    private CanvasBitmap? _bitmap;
-    private CanvasBitmap? _committedBitmap;
+    private CanvasDisplayImage? _bitmap;
+    private CanvasDisplayImage? _committedBitmap;
     private CancellationTokenSource? _loadCancellation;
     private CancellationTokenSource? _solveCancellation;
     private CancellationTokenSource? _starAnalysisCancellation;
@@ -871,7 +870,7 @@ public sealed partial class MainPage : Page, IDisposable
 
         try
         {
-            await ClipboardService.CopyImageAsync(_bitmap);
+            await ClipboardService.CopyImageAsync(_bitmap.Snapshot());
         }
         catch (Exception exception)
         {
@@ -967,7 +966,7 @@ public sealed partial class MainPage : Page, IDisposable
             return;
         }
 
-        CanvasBitmap committedBitmap = _committedBitmap;
+        CanvasDisplayImage committedBitmap = _committedBitmap;
         string sourcePath = _currentPath;
         int sourceWidth = _sourceWidth;
         int sourceHeight = _sourceHeight;
@@ -1011,42 +1010,36 @@ public sealed partial class MainPage : Page, IDisposable
                     processing);
                 if (request.IncludeVisibleOverlays)
                 {
-                    byte[] overlay = RenderFullResolutionOverlay(
-                        overlayScene,
-                        overlayOptions,
-                        sourceWidth,
-                        sourceHeight);
-                    Rgba16Compositor.CompositePremultipliedBgra8(
-                        MemoryMarshal.Cast<byte, ushort>(rendered.RgbaBytes.AsSpan()),
-                        overlay);
+                    TiledOverlayRasterizer.Draw(ImageCanvas, sourceWidth, sourceHeight,
+                        drawing => overlayScene.Draw(drawing, overlayOptions, 1, 1, Vector2.Zero),
+                        (region, overlay) => {
+                            for (int row = 0; row < region.Height; row++)
+                                Rgba16Compositor.CompositePremultipliedBgra8(
+                                    MemoryMarshal.Cast<byte, ushort>(rendered.RgbaBytes.AsSpan()).Slice(
+                                        ((region.Y + row) * sourceWidth + region.X) * 4, region.Width * 4),
+                                    overlay.AsSpan(row * region.Width * 4, region.Width * 4));
+                        });
                 }
                 await ImageExportService.Save16Async(rendered, destination);
                 return;
             }
 
-            // Snapshot the display pixels synchronously into an export-owned
-            // target. Navigation or a processing reload may dispose the page's
-            // committed bitmap while the asynchronous encoder is still saving.
-            using CanvasRenderTarget renderTarget = new(
-                ImageCanvas,
-                sourceWidth,
-                sourceHeight,
-                96);
-            using (CanvasDrawingSession drawingSession = renderTarget.CreateDrawingSession())
+            // The CPU snapshot survives navigation without another full-image
+            // GPU allocation. Only overlay exports need a mutable pixel copy.
+            RenderedImageData display = committedBitmap.Snapshot();
+            if (request.IncludeVisibleOverlays)
             {
-                drawingSession.Clear(Windows.UI.Color.FromArgb(255, 0, 0, 0));
-                drawingSession.DrawImage(committedBitmap);
-                if (request.IncludeVisibleOverlays)
-                {
-                    overlayScene.Draw(
-                        drawingSession,
-                        overlayOptions,
-                        1,
-                        1,
-                        Vector2.Zero);
-                }
+                display = display with { Bgra = (byte[])display.Bgra.Clone() };
+                TiledOverlayRasterizer.Draw(ImageCanvas, sourceWidth, sourceHeight,
+                    drawing => overlayScene.Draw(drawing, overlayOptions, 1, 1, Vector2.Zero),
+                    (region, overlay) => {
+                        for (int row = 0; row < region.Height; row++)
+                            Bgra8Compositor.CompositePremultiplied(
+                                display.Bgra.AsSpan(((region.Y + row) * sourceWidth + region.X) * 4, region.Width * 4),
+                                overlay.AsSpan(row * region.Width * 4, region.Width * 4));
+                    });
             }
-            await ImageExportService.Save8Async(renderTarget, destination);
+            await ImageExportService.Save8Async(display, destination);
         }
         catch (Exception exception)
         {
@@ -1056,37 +1049,6 @@ public sealed partial class MainPage : Page, IDisposable
         {
             ViewModel.IsExporting = false;
         }
-    }
-
-    private byte[] RenderFullResolutionOverlay(
-        OverlayScene overlayScene,
-        OverlayOptions overlayOptions,
-        int sourceWidth,
-        int sourceHeight)
-    {
-        if (!overlayScene.HasVisibleOverlays(overlayOptions))
-        {
-            throw new InvalidOperationException("No visible overlays are available to export.");
-        }
-
-        using CanvasRenderTarget overlay = new(
-            ImageCanvas,
-            sourceWidth,
-            sourceHeight,
-            96,
-            DirectXPixelFormat.B8G8R8A8UIntNormalized,
-            CanvasAlphaMode.Premultiplied);
-        using (CanvasDrawingSession drawingSession = overlay.CreateDrawingSession())
-        {
-            drawingSession.Clear(Windows.UI.Color.FromArgb(0, 0, 0, 0));
-            overlayScene.Draw(
-                drawingSession,
-                overlayOptions,
-                1,
-                1,
-                Vector2.Zero);
-        }
-        return overlay.GetPixelBytes();
     }
 
     private async void About_Click(object sender, RoutedEventArgs e)
@@ -1199,14 +1161,8 @@ public sealed partial class MainPage : Page, IDisposable
                 return false;
             }
 
-            CanvasBitmap nextBitmap = CanvasBitmap.CreateFromBytes(
-                ImageCanvas,
-                image.Bgra,
-                image.Width,
-                image.Height,
-                DirectXPixelFormat.B8G8R8A8UIntNormalized,
-                96.0f,
-                CanvasAlphaMode.Ignore);
+            CanvasDisplayImage nextBitmap = await CanvasDisplayImage.CreateAsync(ImageCanvas, image, cancellationToken: cancellationToken);
+            if (_disposed || generation != _loadGeneration) { nextBitmap.Dispose(); return false; }
 
             SetCommittedBitmap(nextBitmap);
             _sourceWidth = image.Width;
@@ -1262,14 +1218,9 @@ public sealed partial class MainPage : Page, IDisposable
             return;
         }
 
-        CanvasBitmap nextBitmap = CanvasBitmap.CreateFromBytes(
-            ImageCanvas,
-            image.Bgra,
-            image.Width,
-            image.Height,
-            DirectXPixelFormat.B8G8R8A8UIntNormalized,
-            96.0f,
-            CanvasAlphaMode.Ignore);
+        CanvasDisplayImage nextBitmap = await CanvasDisplayImage.CreateAsync(ImageCanvas, image, cancellationToken: request.CancellationToken);
+        if (_stretchWindow is null || !string.Equals(path, _currentPath, StringComparison.OrdinalIgnoreCase))
+        { nextBitmap.Dispose(); return; }
         if (!ReferenceEquals(_bitmap, _committedBitmap))
         {
             _bitmap?.Dispose();
@@ -1286,7 +1237,7 @@ public sealed partial class MainPage : Page, IDisposable
         return processing;
     }
 
-    private void SetCommittedBitmap(CanvasBitmap bitmap)
+    private void SetCommittedBitmap(CanvasDisplayImage bitmap)
     {
         if (!ReferenceEquals(_bitmap, _committedBitmap))
         {
@@ -1320,17 +1271,12 @@ public sealed partial class MainPage : Page, IDisposable
             _sourceWidth * _scale,
             _sourceHeight * _scale);
         CanvasImageInterpolation interpolation = ImageSampling.NeedsFiltering(
-            _bitmap.SizeInPixels.Width, _bitmap.SizeInPixels.Height,
+            _bitmap.Width, _bitmap.Height,
             _sourceWidth, _sourceHeight,
             destination.Width, destination.Height, sender.Dpi / 96.0)
             ? CanvasImageInterpolation.HighQualityCubic
             : CanvasImageInterpolation.NearestNeighbor;
-        args.DrawingSession.DrawImage(
-            _bitmap,
-            destination,
-            _bitmap.Bounds,
-            1.0f,
-            interpolation);
+        _bitmap.Draw(args.DrawingSession, destination, interpolation);
         _overlayScene.Draw(args.DrawingSession, _overlayOptions, _scale, _scale, _offset);
     }
 
@@ -1431,8 +1377,8 @@ public sealed partial class MainPage : Page, IDisposable
             return false;
         }
 
-        int bitmapWidth = checked((int)_committedBitmap.SizeInPixels.Width);
-        int bitmapHeight = checked((int)_committedBitmap.SizeInPixels.Height);
+        int bitmapWidth = _committedBitmap.Width;
+        int bitmapHeight = _committedBitmap.Height;
         int centerX = Math.Min(
             (int)Math.Floor(imagePoint.X * bitmapWidth / _sourceWidth),
             bitmapWidth - 1);

@@ -121,6 +121,26 @@ procedural stars and diffuse emission were integrated by the production batch
 stacker into a 760 × 541 canvas (four accepted, zero rejected). This is generated
 test data, not an observed sky image; the result uses Seiza's normal image renderer.
 
+## Viewing large mosaics (development builds)
+
+The Windows viewer opens mosaics wider or taller than the graphics device's
+single-bitmap limit (commonly 16,384 pixels). Large display images use Win2D
+virtual bitmaps with on-demand GPU caching. Fit, zoom and pan retain the source
+resolution; small images keep the normal resident-bitmap path. Full-size
+pixel sampling uses the same display samples across cached regions.
+
+Clipboard and 8-bit PNG/JPEG/TIFF exports encode those samples directly, without
+an oversized GPU target. Overlays for both 8-bit and 16-bit exports render in
+bounded tiles at the original image coordinates. Display colors and output
+dimensions are preserved. Source rendering still needs enough CPU memory for
+the complete image, and managed pixel-buffer and output-format limits still
+apply; this does not add disk-backed scientific processing.
+
+Regression checks cover 20,001-pixel-wide and 20,003-pixel-tall images, exact
+pixels beyond 16,384, hardware-default/software rendering, filtered fractional
+zoom, overlay continuity and lossless PNG/TIFF round trips. See the
+[Windows validation notes](SEIZA-0442-VALIDATION.md) for the interactive scope.
+
 ## Faster solver: measured against 0.39.0
 
 The existing bounded image-solve entry point now uses Seiza's shared image-file

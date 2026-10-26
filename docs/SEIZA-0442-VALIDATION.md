@@ -90,12 +90,39 @@ the adapter now explicitly preserves SEIZA transfer/provenance cards.
 Regression checks cover both FITS/XISF directions, unchanged reviewed pixels
 even when original sources change, and negative/NaN preservation.
 
+## Large mosaic display and export
+
+The viewer now uses Win2D's virtual bitmap path when either image dimension
+exceeds the current device's maximum bitmap size. An immutable, seekable BMP
+view exposes the native BGRA samples without encoding a second full image or
+writing a temporary raster. Direct2D handles on-demand GPU tiles and filtering;
+ordinary images retain the resident-bitmap path.
+
+Windows graphics regression tests compare exact source pixels across cached
+regions and at far edges for 20,001 × 17 and 17 × 20,003 images, on both the
+default device and forced software renderer. Filtered gradient comparisons
+cover 100%, 75%, 20% and 5% zoom. Overlay rasterization reaches past pixel
+16,384 without a full-image render target. PNG and TIFF encoders round-trip
+large width/height and exact BGRA colors. CPU snapshots survive display-resource
+disposal; cancellation before virtual loading leaves source pixels intact.
+
+An isolated production App entry point loaded a synthetic 20,001 × 1,025 FITS
+fixture and exposed its correct dimensions and normal viewer controls. The
+desktop screenshot was black and activation twice failed with
+`GetCursorPos failed: Access is denied. (0x80070005)`, so manual mosaic
+zoom/pan/navigation is not claimed. Automated GPU rendering and codec checks
+above passed. No real astronomical mosaic color/quality assessment is claimed.
+
+These changes remove the per-texture dimension limit. Native rendering still
+materializes the complete CPU image and uses managed pixel arrays; available
+memory, array sizes and encoder-format limits remain applicable.
+
 ## Checks
 
 - Release solution build: zero warnings/errors.
 - Unsigned MSI build and static Finish/Shell sequencing check pass; no install.
-- Managed suite: 789 passed.
-- Windows suite: 78 passed, 4 optional real-source/encoder tests skipped.
+- Managed suite: 796 passed.
+- Windows suite: 96 passed, 4 optional real-source/encoder tests skipped.
 - Windows platform adapter: 22 passed; Explorer provider: 30 passed.
 - Published native suites: C ABI 145; stacking unit 503 (5 ignored), caller-pool
   1, integrations 20 + 12, output-version 55, doc 1; parallax 141 passed.
@@ -105,3 +132,5 @@ Raw local evidence is under ignored `artifacts/seiza-0442/`, including native
 traces, source hashes, checkpoint comparison, test logs and diagnostic app
 results. User settings and original images were unchanged. No installation,
 merge or release was performed.
+Large-image graphics, codec, fixture and package evidence is under ignored
+`artifacts/large-mosaic-ui/`.
