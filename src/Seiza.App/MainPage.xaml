@@ -58,6 +58,15 @@
             </AppBarButton>
 
             <AppBarButton
+                Click="OpenImageList_Click"
+                Label="Open image list"
+                ToolTipService.ToolTip="Open images listed in a TXT or CSV file">
+                <AppBarButton.Icon>
+                    <FontIcon Glyph="&#xE8A5;" />
+                </AppBarButton.Icon>
+            </AppBarButton>
+
+            <AppBarButton
                 x:Name="StackImagesButton"
                 Click="StackImages_Click"
                 IsEnabled="False"

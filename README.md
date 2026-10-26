@@ -96,6 +96,32 @@ camera and tour controls, encoder availability and export limits. Windows
 
 ## Image viewing and folder review
 
+Use **Open image list** to browse images named in a `.txt` or `.csv` file as one
+collection, including images from different folders. TXT files contain one path
+per line (optional surrounding quotes). CSV files use a `path`, `filepath`,
+`file_path`, `file`, or `filename` header (case-insensitive); without one, the first
+column contains the paths. Leading settings rows before a recognized header,
+such as those exported by PixInsight SubframeSelector, are ignored. All listed
+images are loaded, regardless of SubframeSelector's Approved flag. Quote CSV
+paths containing commas. Absolute paths are accepted, and relative paths resolve
+from the directory containing the list file. Duplicate paths appear once; the
+browser reports missing, invalid, or unsupported entries that were skipped.
+
+For example, a TXT list can contain:
+
+```text
+C:\Astro\night1\light001.fits
+night2\light002.xisf
+```
+
+Or a CSV list can contain:
+
+```csv
+path,rating
+C:\Astro\night1\light001.fits,5
+"night2\light,002.fits",4
+```
+
 Open FITS, XISF, PNG, JPEG, and TIFF images, folders, or dropped files. Browse
 naturally sorted image sets in a cached thumbnail rail without blocking the UI.
 **Open folder** includes nested subfolders. Group the sidebar by **Folder Path**
