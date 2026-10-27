@@ -37,7 +37,7 @@
             <AppBarButton
                 Click="OpenImage_Click"
                 Label="Open image"
-                ToolTipService.ToolTip="Open image (Ctrl+O)">
+                ToolTipService.ToolTip="Open images or TXT/CSV image lists (Ctrl+O)">
                 <AppBarButton.Icon>
                     <FontIcon Glyph="&#xE8E5;" />
                 </AppBarButton.Icon>
@@ -60,10 +60,13 @@
             <AppBarButton
                 Click="OpenImageList_Click"
                 Label="Open image list"
-                ToolTipService.ToolTip="Open images listed in a TXT or CSV file">
+                ToolTipService.ToolTip="Open images listed in a TXT or CSV file (Ctrl+Alt+O)">
                 <AppBarButton.Icon>
                     <FontIcon Glyph="&#xE8A5;" />
                 </AppBarButton.Icon>
+                <AppBarButton.KeyboardAccelerators>
+                    <KeyboardAccelerator Key="O" Modifiers="Control,Menu" />
+                </AppBarButton.KeyboardAccelerators>
             </AppBarButton>
 
             <AppBarButton
@@ -71,7 +74,7 @@
                 Click="StackImages_Click"
                 IsEnabled="False"
                 Label="Stack"
-                ToolTipService.ToolTip="Register and stack the FITS or XISF images in this folder">
+                ToolTipService.ToolTip="Register and stack the FITS or XISF images in this collection">
                 <AppBarButton.Icon>
                     <FontIcon Glyph="&#xE8FD;" />
                 </AppBarButton.Icon>
@@ -465,6 +468,11 @@
                                         Click="BrowserCancelScan_Click"
                                         Padding="6,2" />
                                 </Grid>
+                                <Expander x:Name="BrowserListIssuesExpander" Header="Skipped entries" Visibility="Collapsed" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                    <ScrollViewer MaxHeight="180" HorizontalScrollBarVisibility="Disabled">
+                                        <TextBlock x:Name="BrowserListIssuesText" FontSize="11" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                    </ScrollViewer>
+                                </Expander>
                             </StackPanel>
                             <ListView
                                 x:Name="ImageBrowserList"
@@ -608,9 +616,10 @@
                 <TextBlock
                     HorizontalAlignment="Center"
                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                    Text="Open a FITS, XISF, or standard image; choose a folder; or drop one here."
+                    Text="Open an image, folder, or TXT/CSV image list; or drop one here."
                     TextAlignment="Center"
                     TextWrapping="Wrap" />
+                <Button Content="Open image list…" Click="OpenImageList_Click" HorizontalAlignment="Center" />
                 <TextBlock
                     HorizontalAlignment="Center"
                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"

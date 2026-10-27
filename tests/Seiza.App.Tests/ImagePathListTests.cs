@@ -1,4 +1,6 @@
 using Seiza.App.Services;
+using System.Runtime.InteropServices;
+using System.Text;
 using Xunit;
 
 namespace Seiza.App.Tests;
@@ -6,6 +8,110 @@ namespace Seiza.App.Tests;
 public sealed class ImagePathListTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("SeizaPathList-").FullName;
+
+    [Fact]
+    public void CsvIssuesRetainSourceAndPhysicalLinesAcrossBlankAndMultilineRows()
+    {
+        string image = Write("frame.fits", "");
+        string list = Write("issues.csv", "\npath,note\n\nframe.fits,\"first\nsecond\"\n\nmissing.fits,no\nnotes.txt,unsupported\n,empty\n");
+        var result = ImagePathList.Read(list);
+        Assert.Equal(image, Assert.Single(result.Paths));
+        Assert.Equal(new long[] { 7, 8, 9 }, result.Issues.Select(issue => issue.Line));
+        Assert.All(result.Issues, issue => Assert.Equal(list, issue.ListPath));
+        Assert.Equal("missing.fits", result.Issues[0].Value);
+        Assert.Contains("Unsupported", result.Issues[1].Reason);
+        Assert.Contains("Missing image path", result.Issues[2].Reason);
+    }
+
+    [Fact]
+    public void TextIssuesKeepOriginalLinesAndIgnoreQuotedEmptyRows()
+    {
+        string list = Write("issues.txt", "\n\"\"\nmissing.fits\n\nnotes.txt\n");
+        var result = ImagePathList.Read(list);
+        Assert.Equal(new long[] { 3, 5 }, result.Issues.Select(issue => issue.Line));
+    }
+
+    [Theory]
+    [InlineData("images.txt", "second.fits\nfirst.fits\n")]
+    [InlineData("images.csv", "File\nsecond.fits\nfirst.fits\n")]
+    public void Utf16BomListsRetainTheirDeclaredOrder(string name, string text)
+    {
+        string first = Write("first.fits", "");
+        string second = Write("second.fits", "");
+        string list = Path.Combine(_root, name);
+        File.WriteAllText(list, text, Encoding.Unicode);
+        Assert.Equal(new[] { second, first }, ImagePathList.Read(list).Paths);
+    }
+
+    [Fact]
+    public void MissingHeaderlessImageStillPreventsAColumnSwitch()
+    {
+        string image = Write("frame.fits", "");
+        var result = ImagePathList.Read(Write("images.csv", "missing.fits,note\nframe.fits,File\n"));
+        Assert.Equal(image, Assert.Single(result.Paths));
+        Assert.Equal(1, result.SkippedCount);
+    }
+
+    [Fact]
+    public void CommandLineAcceptsListsWithoutTreatingThemAsImages()
+    {
+        string image = Write("frame.fits", "");
+        string csv = Write("selected.CSV", "path\nframe.fits\n");
+        string txt = Write("selected.txt", "frame.fits\n");
+        string other = Write("notes.json", "{}");
+        Assert.Equal(new[] { csv, txt, image }, CommandLineActivationRelay.GetSupportedPaths(
+            new[] { $"\"{csv}\"", txt, image, other, Path.Combine(_root, "missing.csv") }));
+        Assert.False(ImageFileTypes.IsSupportedImage(csv));
+        Assert.False(ImageFileTypes.IsSupportedImage(txt));
+        Assert.True(ImageFileTypes.IsOpenableFile(csv));
+    }
+
+    [Fact]
+    public void HardLinkedImagesAreDeduplicatedByFileIdentity()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string image = Write("frame.fits", "");
+        string alias = Path.Combine(_root, "alias.fits");
+        Assert.True(CreateHardLink(alias, image, 0), $"CreateHardLink failed: {Marshal.GetLastWin32Error()}");
+        var result = ImagePathList.Read(Write("images.txt", "alias.fits\nframe.fits\n"));
+        Assert.Equal(alias, Assert.Single(result.Paths));
+        Assert.Equal(0, result.SkippedCount);
+    }
+
+    [Fact]
+    public void WindowsShortcutsUseTheirSavedTargetsAndReportBrokenLinks()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string image = Write("frame.fits", "");
+        CreateShortcut(Path.Combine(_root, "frame.lnk"), image);
+        CreateShortcut(Path.Combine(_root, "missing.lnk"), Path.Combine(_root, "missing.fits"));
+        var result = ImagePathList.Read(Write("images.txt", "frame.lnk\nframe.fits\nmissing.lnk\n"));
+        Assert.Equal(image, Assert.Single(result.Paths));
+        Assert.Equal(3, Assert.Single(result.Issues).Line);
+        Assert.Contains("Shortcut target", result.Issues[0].Reason);
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static void CreateShortcut(string path, string target)
+    {
+        object shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true)!)!;
+        object? shortcut = null;
+        try
+        {
+            shortcut = ((dynamic)shell).CreateShortcut(path);
+            ((dynamic)shortcut).TargetPath = target;
+            ((dynamic)shortcut).Save();
+        }
+        finally
+        {
+            if (shortcut is not null) Marshal.FinalReleaseComObject(shortcut);
+            Marshal.FinalReleaseComObject(shell);
+        }
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLink(string newName, string existingName, nint securityAttributes);
 
     [Fact]
     public void TextSupportsQuotedAbsoluteAndRelativePathsAndDeduplicates()
@@ -96,13 +202,30 @@ public sealed class ImagePathListTests : IDisposable
         }
     }
 
-    [Fact]
-    public void MalformedCsvReportsLineInsteadOfReturningPartialCollection()
+    [Theory]
+    [InlineData("\"unterminated\n")]
+    [InlineData("\"first.fits\"trailing\n")]
+    [InlineData("fir\"st.fits\n")]
+    [InlineData("\"first\" \".fits\"\n")]
+    public void MalformedCsvReportsLineInsteadOfReturningPartialCollection(string malformed)
     {
         Write("first.fits", "");
-        string list = Write("images.csv", "path\nfirst.fits\n\"unterminated\n");
+        string list = Write("images.csv", "path\nfirst.fits\n" + malformed);
         InvalidDataException error = Assert.Throws<InvalidDataException>(() => ImagePathList.Read(list));
         Assert.Contains("line 3", error.Message);
+        Assert.Contains(list, error.Message);
+    }
+
+    [Theory]
+    [InlineData("images.txt")]
+    [InlineData("images.csv")]
+    public void InvalidEncodingFailsRatherThanSubstitutingPathCharacters(string name)
+    {
+        string list = Path.Combine(_root, name);
+        File.WriteAllBytes(list, [0xff, 0xff]);
+        Assert.Throws<InvalidDataException>(() => ImagePathList.Read(list));
+        File.WriteAllBytes(list, [0xff, 0xfe, 0x61]);
+        Assert.Throws<InvalidDataException>(() => ImagePathList.Read(list));
     }
 
     [Fact]

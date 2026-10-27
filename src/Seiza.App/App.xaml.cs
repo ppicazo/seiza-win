@@ -252,7 +252,7 @@ public partial class App : Application
             return fileActivation.Files
                 .OfType<StorageFile>()
                 .Select(file => file.Path)
-                .Where(path => File.Exists(path) && ImageFileService.IsSupportedImage(path))
+                .Where(path => File.Exists(path) && ImageFileTypes.IsOpenableFile(path))
                 .ToArray();
         }
 
@@ -260,7 +260,7 @@ public partial class App : Application
             ? launch.Arguments
             : fallbackArguments;
         string candidate = arguments.Trim().Trim('"');
-        return File.Exists(candidate) && ImageFileService.IsSupportedImage(candidate)
+        return File.Exists(candidate) && ImageFileTypes.IsOpenableFile(candidate)
             ? [candidate]
             : [];
     }

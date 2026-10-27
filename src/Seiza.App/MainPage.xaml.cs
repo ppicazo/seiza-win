@@ -96,7 +96,8 @@ public sealed partial class MainPage : Page, IDisposable
         await App.Updates.CheckForUpdatesAsync(this, userInitiated: false);
     }
 
-    internal Task OpenPathAsync(string path) => OpenImageAndDiscoverSiblingsAsync(path);
+    internal Task OpenPathAsync(string path) => ImagePathList.IsSupported(path)
+        ? OpenImageListAsync(path) : OpenImageAndDiscoverSiblingsAsync(path);
 
     private async void OpenImage_Click(object sender, RoutedEventArgs e)
     {
@@ -1877,8 +1878,8 @@ public sealed partial class MainPage : Page, IDisposable
             case StorageFolder folder:
                 await OpenFolderAsync(folder.Path);
                 break;
-            case StorageFile file when ImageFileService.IsSupportedImage(file.Path):
-                await OpenImageAndDiscoverSiblingsAsync(file.Path);
+            case StorageFile file when ImageFileTypes.IsOpenableFile(file.Path):
+                await OpenPathAsync(file.Path);
                 break;
         }
     }

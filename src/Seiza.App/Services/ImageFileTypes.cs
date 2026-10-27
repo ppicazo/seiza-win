@@ -18,6 +18,13 @@ internal static class ImageFileTypes
     public static bool IsSupportedImage(string path) =>
         IsSupportedExtension(Path.GetExtension(path));
 
+    public static bool IsOpenableFile(string path) =>
+        IsSupportedImage(path) || IsSupportedImageList(path);
+
+    public static bool IsSupportedImageList(string path) =>
+        Path.GetExtension(path).Equals(".csv", StringComparison.OrdinalIgnoreCase) ||
+        Path.GetExtension(path).Equals(".txt", StringComparison.OrdinalIgnoreCase);
+
     public static bool IsAstronomyImage(string path) =>
         AstronomyExtensionSet.Contains(Path.GetExtension(path));
 

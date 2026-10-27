@@ -149,6 +149,26 @@ RGB histograms, searchable source headers, and processing provenance.
 
 Native sidebar controls shown with synthetic sample images.
 
+## In development: image-list and mosaic workflow parity
+
+The current development branch adds parity with
+[Seiza for Mac PR #91](https://github.com/theatrus/seiza-mac/pull/91):
+
+- Open TXT/CSV lists through the welcome button, regular Open, drag/drop or
+  command-line activation, as well as **Open image list** (Ctrl+Alt+O).
+- Start imported lists grouped by source directory without changing the saved
+  preference. **None** preserves the list's original order. Expand **Skipped
+  entries** for the source list, physical line and reason for each skipped image.
+- Choose **Stacking mode** first. Expanded mosaics work directly from the
+  selected lights; **Optional sky-panel analysis** is a separate selection aid
+  and retains the chosen mode. Shared fixed alignment cannot be newly selected
+  for expanded canvases, while an existing selection can be cleared.
+- Analyze more than 512 lights with bounded comparison batches and cancellation.
+  The full footprint matrix still grows quadratically with solved-light count.
+
+See [the parity comparison](docs/MAC-PR-91-PARITY.md) and the updated
+[mosaic guide](docs/MOSAIC-STACKING.md). These changes are not in release 0.8.7.
+
 ## Seiza for Windows 0.8.7: TXT and CSV image collections
 
 Open a saved TXT or CSV list as one collection across capture folders. Review

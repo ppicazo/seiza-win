@@ -28,7 +28,8 @@ internal static class ImageBrowserGroupingModel
     public static ImageBrowserGroupingResult Create(
         IEnumerable<string> paths,
         string? rootFolder,
-        ImageBrowserGrouping grouping)
+        ImageBrowserGrouping grouping,
+        bool preserveInputOrder = false)
     {
         ArgumentNullException.ThrowIfNull(paths);
         if (!Enum.IsDefined(grouping))
@@ -56,7 +57,8 @@ internal static class ImageBrowserGroupingModel
         }
 
         PathEntry[] entries = uniquePaths.Values.ToArray();
-        Array.Sort(entries, ComparePaths);
+        if (!preserveInputOrder || grouping != ImageBrowserGrouping.None)
+            Array.Sort(entries, ComparePaths);
         if (entries.Length == 0)
         {
             return new ImageBrowserGroupingResult([], []);
