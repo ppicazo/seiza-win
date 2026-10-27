@@ -19,6 +19,9 @@ public sealed partial class MainPage
     private ImageBrowserGrouping _browserGrouping = ImageBrowserGrouping.Folder;
     private string? _browserRoot;
     private string? _browserListPath;
+    private string[]? _browserListPaths;
+    private string _browserListIssueDetails = string.Empty;
+    private int _browserListSkippedCount;
     private string? _browserStatus;
     private bool _includeSubfolders = true;
     private bool _isScanningFolder;
@@ -28,7 +31,16 @@ public sealed partial class MainPage
 
     private void InitializeImageBrowser()
     {
-        _browserGrouping = CatalogSettingsStore.LoadBrowserGrouping();
+        SetBrowserGrouping(CatalogSettingsStore.LoadBrowserGrouping());
+        _browserInitialized = true;
+        UpdateBrowserControls();
+    }
+
+    private void SetBrowserGrouping(ImageBrowserGrouping grouping)
+    {
+        bool initialized = _browserInitialized;
+        _browserInitialized = false;
+        _browserGrouping = grouping;
         BrowserGroupingBox.SelectedIndex = _browserGrouping switch
         {
             ImageBrowserGrouping.Filter => 1,
@@ -36,8 +48,7 @@ public sealed partial class MainPage
             ImageBrowserGrouping.None => 3,
             _ => 0,
         };
-        _browserInitialized = true;
-        UpdateBrowserControls();
+        _browserInitialized = initialized;
     }
 
     private CancellationTokenSource BeginBrowserDiscovery()
@@ -87,20 +98,27 @@ public sealed partial class MainPage
     {
         if (_disposed) return;
         var cancellation = BeginBrowserDiscovery();
+        _isScanningFolder = false;
         try
         {
             listPath = Path.GetFullPath(listPath);
             ImagePathListResult result = await Task.Run(() => ImagePathList.Read(listPath, cancellation.Token), cancellation.Token);
             if (!IsCurrentBrowserDiscovery(cancellation)) return;
-            SetCollection(result.Paths, result.Paths.Count > 0 ? result.Paths[0] : null,
-                cancelDiscovery: false, listPath: listPath);
-            _browserStatus = $"{Path.GetFileName(listPath)} · {result.Paths.Count:N0} images";
+            if (result.Paths.Count == 0)
+                throw new InvalidDataException("The list contains no existing supported images." + Environment.NewLine +
+                    DescribeListIssues(listPath, result.Issues));
+            // A list starts with source-directory groups, without overwriting
+            // the user's saved preference for ordinary image/folder windows.
+            SetBrowserGrouping(ImageBrowserGrouping.Folder);
+            SetCollection(result.Paths, null, cancelDiscovery: false, listPath: listPath, listIssues: result.Issues);
+            _browserStatus = $"{Path.GetFileName(listPath)} · {result.Paths.Count:N0} image{(result.Paths.Count == 1 ? string.Empty : "s")}";
             if (result.SkippedCount > 0)
             {
-                _browserStatus += $" · {result.SkippedCount:N0} missing, invalid or unsupported entries skipped";
+                _browserStatus += $" · {result.SkippedCount:N0} missing, invalid or unsupported " +
+                    (result.SkippedCount == 1 ? "entry skipped" : "entries skipped");
             }
             _isBrowserOpen = true;
-            ViewModel.ErrorMessage = result.Paths.Count == 0 ? "The list contains no existing supported images." : null;
+            ViewModel.ErrorMessage = null;
             UpdateNavigationState();
             UpdateVisualState();
             if (_selectedIndex >= 0) await LoadImageAsync(_imagePaths[_selectedIndex]);
@@ -196,17 +214,23 @@ public sealed partial class MainPage
         string? selectedPath,
         string? folderRoot = null,
         bool cancelDiscovery = true,
-        string? listPath = null)
+        string? listPath = null,
+        IReadOnlyList<ImagePathListIssue>? listIssues = null)
     {
         if (cancelDiscovery) CancelBrowserDiscovery();
         _thumbnailCancellation?.Cancel();
         _thumbnailCancellation = null;
-        if (!string.Equals(_browserRoot, folderRoot, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(_browserRoot, folderRoot, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(_browserListPath, listPath, StringComparison.OrdinalIgnoreCase))
         {
             _collapsedBrowserGroups.Clear();
         }
         _browserRoot = folderRoot;
         _browserListPath = listPath;
+        _browserListPaths = listPath is not null ? paths.ToArray() : null;
+        _browserListSkippedCount = listIssues?.Count ?? 0;
+        _browserListIssueDetails = listPath is not null ? DescribeListIssues(listPath, listIssues ?? []) : string.Empty;
+        BrowserListIssuesExpander.IsExpanded = false;
         if (folderRoot is null) _browserStatus = null;
         _imagePaths.Clear();
         _imagePaths.AddRange(paths);
@@ -232,7 +256,8 @@ public sealed partial class MainPage
     private void RebuildBrowserGroups(string? selectedPath)
     {
         ImageBrowserGroupingResult layout = ImageBrowserGroupingModel.Create(
-            _imagePaths, _browserRoot, _browserGrouping);
+            _browserListPaths ?? (IReadOnlyList<string>)_imagePaths, _browserRoot, _browserGrouping,
+            preserveInputOrder: _browserListPath is not null);
         var existing = BrowserItems.ToDictionary(item => item.Path, StringComparer.OrdinalIgnoreCase);
         _thumbnailCancellation?.Cancel();
         _syncingBrowserSelection = true;
@@ -283,13 +308,17 @@ public sealed partial class MainPage
         if (!_browserInitialized || _disposed) return;
         string? selected = _selectedIndex >= 0 && _selectedIndex < _imagePaths.Count
             ? _imagePaths[_selectedIndex] : null;
-        _browserGrouping = BrowserGroupingBox.SelectedIndex switch
+        ImageBrowserGrouping grouping = BrowserGroupingBox.SelectedIndex switch
         {
             1 => ImageBrowserGrouping.Filter,
             2 => ImageBrowserGrouping.FileType,
             3 => ImageBrowserGrouping.None,
             _ => ImageBrowserGrouping.Folder,
         };
+        // WinUI may deliver a programmatic selection change after initialization
+        // has completed. Only an actual user change should persist a preference.
+        if (grouping == _browserGrouping) return;
+        _browserGrouping = grouping;
         try { CatalogSettingsStore.SaveBrowserGrouping(_browserGrouping); }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -393,11 +422,18 @@ public sealed partial class MainPage
             : _browserGrouping == ImageBrowserGrouping.None ? string.Empty : "Select a group header to collapse or expand it.";
         BrowserStatusText.Text = _browserStatus ?? $"{BrowserItems.Count:N0} images";
         ToolTipService.SetToolTip(BrowserStatusText, _browserListPath);
+        BrowserListIssuesExpander.Visibility = _browserListSkippedCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+        BrowserListIssuesExpander.Header = $"Skipped entries ({_browserListSkippedCount:N0})";
+        BrowserListIssuesText.Text = _browserListIssueDetails;
         BrowserScanProgress.IsActive = _isScanningFolder;
         BrowserScanProgress.Visibility = _isScanningFolder ? Visibility.Visible : Visibility.Collapsed;
         BrowserCancelScanButton.Visibility = _isScanningFolder ? Visibility.Visible : Visibility.Collapsed;
         ImageBrowserList.IsEnabled = !_isScanningFolder;
     }
+
+    private static string DescribeListIssues(string listPath, IReadOnlyList<ImagePathListIssue> issues) =>
+        listPath + Environment.NewLine + string.Join(Environment.NewLine, issues.Select(issue =>
+            $"Line {issue.Line}: {issue.Value} — {issue.Reason}"));
 
     // The scanned collection defines stacking scope. Grouping and collapse are
     // presentation only; they must not silently withhold tree inputs.

@@ -14,17 +14,25 @@ internal sealed record SkySolveFailure(string Path, string Reason);
 /// clustering prevents a chain of dithers from swallowing an entire mosaic.</summary>
 internal static class SkyPanelGrouping
 {
-    public static IReadOnlyList<SkyField> Group(IReadOnlyList<SkySolvedFrame> frames, double[][] overlaps)
+    public static IReadOnlyList<SkyField> Group(IReadOnlyList<SkySolvedFrame> frames, double[][] overlaps,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         int n = frames.Count;
-        if (overlaps.Length != n || overlaps.Any(row => row.Length != n ||
-            row.Any(value => !double.IsFinite(value) || value < 0 || value > 1)))
+        if (overlaps.Length != n)
             throw new ArgumentException("Invalid sky-footprint overlap matrix.", nameof(overlaps));
+        foreach (double[] row in overlaps)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (row.Length != n || row.Any(value => !double.IsFinite(value) || value < 0 || value > 1))
+                throw new ArgumentException("Invalid sky-footprint overlap matrix.", nameof(overlaps));
+        }
         var panels = new List<List<int>>();
         // Sorting makes group identifiers and panel membership independent of
         // discovery/solve completion order.
         foreach (int i in Enumerable.Range(0, n).OrderBy(i => frames[i].Path, StringComparer.OrdinalIgnoreCase))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var panel = panels.FirstOrDefault(p => p.All(j => Coverage(i, j) >= 0.85));
             if (panel is null) panels.Add([i]);
             else panel.Add(i);
@@ -33,11 +41,13 @@ internal static class SkyPanelGrouping
         var fields = new List<SkyField>();
         while (remaining.Count > 0)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             int seed = remaining.Min();
             remaining.Remove(seed);
             var connected = new List<int> { seed };
             for (int k = 0; k < connected.Count; k++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 foreach (int other in remaining.Order().ToArray())
                     if (panels[connected[k]].Any(i => panels[other].Any(j => Coverage(i, j) >= 0.05)))
                     {

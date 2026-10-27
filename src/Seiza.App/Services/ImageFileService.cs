@@ -30,6 +30,8 @@ internal static class ImageFileService
         {
             picker.FileTypeFilter.Add(extension);
         }
+        picker.FileTypeFilter.Add(".txt");
+        picker.FileTypeFilter.Add(".csv");
 
         WinRT.Interop.InitializeWithWindow.Initialize(picker, ownerWindow);
         IReadOnlyList<StorageFile> files = await picker.PickMultipleFilesAsync();

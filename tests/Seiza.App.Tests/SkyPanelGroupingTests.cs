@@ -6,6 +6,52 @@ namespace Seiza.App.Tests;
 
 public sealed class SkyPanelGroupingTests
 {
+    [Fact]
+    public void Full513LightMatrixAndGroupingRetainBothSkyFields()
+    {
+        SkySolvedFrame[] frames = Enumerable.Range(0, 513)
+            .Select(index => Frame($"frame{index:D4}.fits", index < 257 ? 0 : 180)).ToArray();
+        var matrix = SkyPanelService.OverlapMatrix(frames, null, CancellationToken.None);
+        Assert.Equal(513, matrix.Length);
+        Assert.All(matrix, row => Assert.Equal(513, row.Length));
+        Assert.All(matrix[512].Skip(257), overlap => Assert.InRange(overlap, .999999, 1));
+        Assert.All(matrix[512].Take(257), overlap => Assert.Equal(0, overlap));
+        var groups = SkyPanelGrouping.Group(frames, matrix);
+        Assert.Equal(2, groups.Count);
+        Assert.Equal(257, groups[0].Panels.Sum(panel => panel.Frames.Count));
+        Assert.Equal(256, groups[1].Panels.Sum(panel => panel.Frames.Count));
+        Assert.Throws<OperationCanceledException>(() => SkyPanelGrouping.Group(frames, matrix, new CancellationToken(true)));
+    }
+
+    [Fact]
+    public async Task LargeSelectionsHonorCancellationRatherThanTheOldAdmissionCap()
+    {
+        string root = Path.Combine(Path.GetTempPath(), $"SeizaAdmission-{Guid.NewGuid():N}");
+        string[] paths = Enumerable.Range(0, 513).Select(index => Path.Combine(root, $"frame{index}.fits")).ToArray();
+        var analysis = await SkyPanelService.AnalyzeAsync(paths, null, null, default);
+        Assert.Equal(513, analysis.Failures.Count);
+        Assert.Empty(analysis.Solved);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => SkyPanelService.AnalyzeAsync(
+            paths, null, null, new CancellationToken(true)));
+        await Assert.ThrowsAsync<ArgumentException>(() => SkyPanelService.AnalyzeAsync(["one.fits"], null, null, default));
+    }
+
+    [Fact]
+    public void FootprintComparisonCancelsBetweenBoundedBatches()
+    {
+        using var cancellation = new CancellationTokenSource();
+        int batches = 0;
+        var progress = new InlineProgress(message => { if (++batches == 2) cancellation.Cancel(); });
+        Assert.Throws<OperationCanceledException>(() => SkyPanelService.OverlapMatrix(
+            Enumerable.Range(0, 9).Select(index => Frame($"frame{index}")).ToArray(), progress, cancellation.Token));
+        Assert.Equal(2, batches);
+    }
+
+    private sealed class InlineProgress(Action<string> report) : IProgress<string>
+    {
+        public void Report(string value) => report(value);
+    }
+
     private static SkySolvedFrame Frame(string path, double ra = 0, double dec = 0, double rotation = 0)
     {
         double r = rotation * Math.PI / 180, scale = 0.001;

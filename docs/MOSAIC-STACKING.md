@@ -1,7 +1,9 @@
 # Expanded mosaic stacking
 
-These controls ship in Windows 0.8.6. They use published Seiza/C ABI
-0.44.2 and stacking 0.51.2; no Git or vendored core dependency is used.
+Expanded stacking shipped in Windows 0.8.6. This guide describes the current
+development layout, including parity updates from Mac PR #91. Windows 0.8.7
+still has the earlier layout. The published Seiza/C ABI 0.44.2 and stacking
+0.51.2 dependencies are unchanged; no Git or vendored core dependency is used.
 
 ## GPU preference
 
@@ -30,13 +32,32 @@ session. Both preferences persist immediately and across app restarts.
 
 ![Native Windows GPU mode and planning-budget controls](images/stacking-gpu-budget-settings.png)
 
-## Selecting panels automatically
+## Stack selected lights on an expanding canvas
 
-1. Open a directory, including its subdirectories, and choose **Stack**.
-2. Enable **Group mosaic panels by solved coordinates**. In **Light frames —
+1. Open images, a directory, or a TXT/CSV image list and choose **Stack**.
+2. At the top of the dialog, choose **Stacking mode → Expanded mosaic / dithered edges**.
+3. Select the lights, review filter splitting, calibration and the canvas memory
+   ceiling, then choose **Choose output and stack…**.
+
+Each output registers its selected lights onto one expanding canvas. Inputs can
+come from different folders, and panels can connect through other panels. No
+sky-panel analysis or pre-solving catalogs are required. Star registration
+decides which lights join; disconnected images may be rejected. Filter splitting
+creates one canvas for each output. Canvas size and available resources still
+bound processing; there is no 512-light selection cap.
+
+![Stacking mode and expanded-canvas ceiling before light selection](images/mosaic-stacking/stacking-mode-first.png)
+
+Current development controls shown with a synthetic 513-light selection. This
+checks selection admission and layout; it is not an integration benchmark.
+
+## Optional sky-panel analysis
+
+1. Open a collection and choose **Stack**. Choose the stacking mode explicitly.
+2. Expand **Optional sky-panel analysis** and enable **Group lights by solved sky position**. In **Light frames —
    select inputs**, select the FITS/XISF lights to analyze, then choose **Solve
    and group selected lights**. The standard blind-solving catalogs must already
-   be installed through catalog setup. Up to 512 inputs can be analyzed at once.
+   be installed through catalog setup. At least two lights are required.
 3. Review **Select panels to include**. Confirmed sky coordinates group repeated
    pointings into panels and connect overlapping panels into sky fields. Check
    a panel to include all its exposures, or expand it to select individual lights.
@@ -48,7 +69,7 @@ session. Both preferences persist immediately and across app restarts.
    panel splits disconnected regions into separate outputs, including within
    each filter. Each output needs at least two selected lights (one exposure in
    each of two overlapping panels is sufficient).
-5. Automatic grouping selects **Expanded mosaic / dithered edges**. Review the
+5. Analysis keeps the chosen **Fixed reference frame** or **Expanded mosaic / dithered edges** mode and any custom overlap. Review the
    stacking/calibration options, then choose **Choose output and stack…**. For
    multiple outputs, choose a folder and base name; field/filter suffixes are
    appended. Registration still checks every selected light and reports failures.
@@ -66,6 +87,17 @@ again before stacking. No WCS is written to the input images. Re-solving resets
 the panel selection; switch back to manual mode to change the input list or
 override automatic grouping.
 
+Large selections use smaller native row batches (at most eight rows and about
+4096 pair comparisons, or one row). Cancellation is checked during footprint
+preparation, between batches and during grouping. The full footprint matrix
+still uses time and memory proportional to the square of the solved-light
+count; removing the selection cap does not make this analysis linear.
+
+Automatic calibration prepares one compatible set per output across that output's
+eligible raw lights. Panels and folders within one output share that calibration
+set. Calibrate lights requiring different flat sessions separately before
+combining them into one mosaic output.
+
 ![Automatic coordinate-grouping setup in the native Windows dialog](images/mosaic-stacking/automatic-setup.png)
 
 ![Native panel selection with expandable individual exposures](images/mosaic-stacking/panel-selection.png)
@@ -76,7 +108,7 @@ solver. They illustrate grouping/selection, not independently captured exposures
 
 ## Choosing a canvas
 
-Open **Stack**, select the complete set of light frames, then choose **Canvas**:
+Open **Stack** and choose **Stacking mode** at the top:
 
 - **Fixed reference frame** keeps the existing reference-sized grid and 60%
   default minimum overlap.

@@ -134,14 +134,9 @@ fn area(polygon: &[Point]) -> f64 {
 
 fn overlaps(request: Request) -> Result<Value, String> {
     let n = request.frames.len();
-    if n > 512
-        || request.row_count > 8
-        || request.start_row > n
-        || request.row_count > n - request.start_row
-    {
+    if request.row_count > 8 || request.start_row > n || request.row_count > n - request.start_row {
         return Err(
-            "Solve at most 512 frames per selection; footprint batches contain at most eight rows."
-                .into(),
+            "Footprint batches must contain at most eight rows within the selected frames.".into(),
         );
     }
     let wcs: Vec<_> = request
@@ -223,5 +218,47 @@ mod tests {
         assert!(covered_fraction(&f, &a, &f, &wcs(1.1, 0.0, 0.0)) < 1e-6);
         let fraction = covered_fraction(&f, &a, &f, &wcs(0.0, 0.0, 45.0));
         assert!(fraction > 0.7 && fraction < 0.9, "{fraction}");
+    }
+
+    #[test]
+    fn selections_above_512_keep_every_footprint() {
+        let headers = json!({
+            "CTYPE1": "RA---TAN", "CTYPE2": "DEC--TAN",
+            "CRVAL1": 0.0, "CRVAL2": 0.0, "CRPIX1": 500.5, "CRPIX2": 400.5,
+            "CD1_1": -0.001, "CD1_2": 0.0, "CD2_1": 0.0, "CD2_2": -0.001
+        });
+        let frames = (0..513)
+            .map(|_| Frame {
+                wcs_headers: serde_json::from_value(headers.clone()).unwrap(),
+                ..frame()
+            })
+            .collect();
+        let result = overlaps(Request {
+            frames,
+            start_row: 512,
+            row_count: 1,
+        })
+        .unwrap();
+        let rows = result.as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = rows[0].as_array().unwrap();
+        assert_eq!(row.len(), 513);
+        assert!(row.iter().all(|value| value.as_f64().unwrap() > 0.99999));
+    }
+
+    #[test]
+    fn invalid_batch_sizes_and_ranges_are_still_rejected() {
+        for (start_row, row_count) in [(0, 9), (4, 1), (3, 2), (usize::MAX, 1)] {
+            let request = Request {
+                frames: (0..4).map(|_| frame()).collect(),
+                start_row,
+                row_count,
+            };
+            assert!(
+                overlaps(request)
+                    .unwrap_err()
+                    .contains("at most eight rows")
+            );
+        }
     }
 }

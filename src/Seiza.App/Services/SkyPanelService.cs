@@ -70,7 +70,8 @@ internal static partial class SkyPanelService
     public static async Task<SkyPanelAnalysis> AnalyzeAsync(IReadOnlyList<string> paths, string? catalog,
         IProgress<string>? progress, CancellationToken token)
     {
-        if (paths.Count is < 2 or > 512) throw new ArgumentException("Select between 2 and 512 lights to solve and group.");
+        token.ThrowIfCancellationRequested();
+        if (paths.Count < 2) throw new ArgumentException("Select at least two lights to solve and group.");
         var solved = new List<SkySolvedFrame>();
         var failures = new List<SkySolveFailure>();
         var stamps = new Dictionary<string, SkySourceStamp>(StringComparer.OrdinalIgnoreCase);
@@ -101,7 +102,7 @@ internal static partial class SkyPanelService
         }
         double[][] matrix = await Task.Run(() => OverlapMatrix(solved, progress, token), token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
-        return new(SkyPanelGrouping.Group(solved, matrix), failures, stamps, solved, matrix);
+        return new(SkyPanelGrouping.Group(solved, matrix, token), failures, stamps, solved, matrix);
     }
 
     internal static void ValidateSolution(SolveResult result)
@@ -112,21 +113,32 @@ internal static partial class SkyPanelService
 
     internal static double[][] OverlapMatrix(IReadOnlyList<SkySolvedFrame> frames, IProgress<string>? progress, CancellationToken token)
     {
-        var footprints = new JsonArray(frames.Select(frame => (JsonNode)new JsonObject
+        token.ThrowIfCancellationRequested();
+        var footprints = new JsonArray();
+        foreach (SkySolvedFrame frame in frames)
         {
-            ["width"] = frame.Width, ["height"] = frame.Height,
-            ["wcsHeaders"] = ColorWorkflowService.HeadersFor(frame.Solution),
-        }).ToArray());
+            token.ThrowIfCancellationRequested();
+            footprints.Add(new JsonObject
+            {
+                ["width"] = frame.Width, ["height"] = frame.Height,
+                ["wcsHeaders"] = ColorWorkflowService.HeadersFor(frame.Solution),
+            });
+        }
         var matrix = new double[frames.Count][];
-        for (int row = 0; row < frames.Count; row += 8)
+        // Bound each native call to eight rows and about 4096 comparisons,
+        // or one row for very large selections. The full matrix remains O(n²).
+        int rowsPerBatch = Math.Clamp(4096 / Math.Max(1, frames.Count), 1, 8);
+        for (int row = 0; row < frames.Count; row += rowsPerBatch)
         {
             token.ThrowIfCancellationRequested();
             progress?.Report($"Comparing sky footprints: {row}/{frames.Count}");
-            int count = Math.Min(8, frames.Count - row);
+            token.ThrowIfCancellationRequested();
+            int count = Math.Min(rowsPerBatch, frames.Count - row);
             var request = new JsonObject { ["frames"] = footprints.DeepClone(), ["startRow"] = row, ["rowCount"] = count };
             nint response = Overlaps(request.ToJsonString(), out nint error);
             try
             {
+                token.ThrowIfCancellationRequested();
                 if (response == 0) throw new SeizaCoreException(Marshal.PtrToStringUTF8(error) ?? "Could not compare solved footprints.");
                 var rows = JsonNode.Parse(Marshal.PtrToStringUTF8(response)!)!.AsArray();
                 for (int k = 0; k < count; k++) matrix[row + k] = rows[k]!.AsArray().Select(v => v!.GetValue<double>()).ToArray();

@@ -15,6 +15,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     private readonly string? _browserRoot;
     private readonly Func<bool> _useGpuSetting;
     private readonly Func<int?> _gpuMemorySetting;
+    private readonly string _sharedAlignmentHint;
     private readonly Dictionary<string, string> _referencePaths = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string[]> _rankedReferencePaths = new(StringComparer.Ordinal);
     private readonly TaskCompletionSource<ImageStackBatchResult?> _completion = new(
@@ -48,7 +49,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         _browserRoot = browserRoot;
         MinimumWeightBox.Value = new ImageStackOptions().MinimumWeight;
         SharedAlignmentToggle.IsEnabled = StackingCoreCapabilities.Current.SupportsReferenceImage;
-        SharedAlignmentAvailabilityText.Text = StackingCoreCapabilities.Current.SupportsReferenceImage
+        _sharedAlignmentHint = StackingCoreCapabilities.Current.SupportsReferenceImage
             ? StackingCoreCapabilities.Current.SupportsReferenceImageCandidates
                 ? "A common grid keeps separate filter outputs aligned for color combination."
                 : "This core supports a common grid, but not automatic alignment fallback. Only the chosen channel light is tried."
@@ -212,9 +213,6 @@ public sealed partial class ImageStackWindow : Window, IDisposable
             FrameList.SelectedItems.Clear();
             foreach (StackFrameChoice frame in _frames)
                 if (analysis.Sources.ContainsKey(frame.Path)) FrameList.SelectedItems.Add(frame);
-            CanvasModePicker.SelectedIndex = 1;
-            SharedAlignmentToggle.IsOn = false;
-            if (!_hasCustomOverlap) MinimumOverlapBox.Value = 0.05;
         }
         finally { _initializing = false; }
         BuildSkyPanelReview();
@@ -432,6 +430,18 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     {
         bool expanded = SelectedTag(CanvasModePicker) == "Expanded";
         MosaicOptionsPanel.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        CanvasModeHelpText.Text = expanded
+            ? "Register selected lights onto one expanding canvas per output, including images from different folders. Overlapping panels can connect through other panels. Sky-panel analysis is optional; no pre-solving catalogs are required. Star registration decides which lights join."
+            : "Align and combine selected lights within a fixed reference frame. Choose Expanded mosaic to retain overlapping panels or dithered edges outside that frame.";
+        SharedAlignmentToggle.IsEnabled = StackingCoreCapabilities.Current.SupportsReferenceImage &&
+            (!expanded || SharedAlignmentToggle.IsOn);
+        ChooseAlignmentReferenceButton.IsEnabled = !expanded;
+        ClearAlignmentReferenceButton.Content = expanded ? "Clear shared alignment image" : "Use first stack's reference";
+        SharedAlignmentAvailabilityText.Text = expanded
+            ? SharedAlignmentToggle.IsOn
+                ? "Shared fixed alignment is unavailable on an expanded canvas. Turn it off or clear the selected shared image."
+                : "Each output's channel reference anchors its expanding canvas and normalization. Shared fixed alignment is unavailable."
+            : _sharedAlignmentHint;
         ReferencePanel.Visibility = AutomaticReferenceToggle.IsOn ? Visibility.Collapsed : Visibility.Visible;
         SharedAlignmentPanel.Visibility = SharedAlignmentToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
         FooterHintText.Text = expanded
@@ -480,9 +490,8 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     {
         if (SkyGroupingToggle.IsOn)
         {
-            if (_skyAnalysis is null) return "Solve and review the selected panels before stacking, or switch to manual selection.";
+            if (_skyAnalysis is null) return "Solve and review panels, or turn off optional sky-panel analysis to stack the selected lights directly.";
             if (SelectedPaths.Any(path => !_skyAnalysis.Sources.ContainsKey(path))) return "Only solved and verified lights can be included in automatic mode.";
-            if (options.CanvasMode != StackCanvasMode.Expanded) return "Coordinate-grouped panels require the expanded mosaic canvas.";
             if (_groups.Count == 0) return "Select at least one solved panel.";
         }
         if (options.CanvasMode == StackCanvasMode.Expanded)
@@ -613,7 +622,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
         _calibrationLibraryPath = folder.Path;
         CalibrationLibraryTextBox.Text = folder.Path;
         AutomaticCalibrationHintText.Text =
-            "Masters will be matched independently for each filter stack and cached for reuse.";
+            "Masters are matched independently for each output and cached for reuse. Panels and folders within one output share the same calibration set.";
         UpdateOptionsAndValidation();
     }
 
@@ -628,6 +637,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
 
     private async void ChooseAlignmentReference_Click(object sender, RoutedEventArgs e)
     {
+        if (SelectedTag(CanvasModePicker) == "Expanded") return;
         var picker = new FileOpenPicker
         {
             SuggestedStartLocation = PickerLocationId.PicturesLibrary,
@@ -650,6 +660,7 @@ public sealed partial class ImageStackWindow : Window, IDisposable
     private void ClearAlignmentReference_Click(object sender, RoutedEventArgs e)
     {
         _alignmentReferencePath = null;
+        if (SelectedTag(CanvasModePicker) == "Expanded") SharedAlignmentToggle.IsOn = false;
         AlignmentReferenceText.Text = "First stack's channel reference";
         UpdateOptionsAndValidation();
     }
